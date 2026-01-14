@@ -1,82 +1,129 @@
 /**
  * Sandbox Agent Definition
  *
- * Uses AI SDK for LLM orchestration with tool calling.
- * Implements OpenCode-inspired patterns:
- * - Context window orchestration
- * - State management with diffs
- * - Decision logging
- * - Verification loops
+ * Uses cloud Convex gateway for LLM calls to protect API keys.
+ * The sandbox calls back to the main cloud Convex for all LLM operations.
  *
- * Note: This is a simplified implementation that works without
- * requiring the full Convex Agent component infrastructure.
- * The agent can be upgraded to use @convex-dev/agent once the
- * component is properly configured.
+ * Flow:
+ * 1. Sandbox receives prompt via HTTP
+ * 2. Agent calls cloud gateway with JWT auth
+ * 3. Cloud gateway calls OpenRouter with protected API key
+ * 4. Response returns through the chain
  */
 
-import { generateText, type CoreTool, type CoreMessage } from "ai";
+import { action, internalAction, query, mutation } from "../_generated/server";
+import { api, internal } from "../_generated/api";
+import { v } from "convex/values";
+import { createAllTools } from "../tools";
+import { SYSTEM_PROMPT } from "../prompts/system";
 
 // Default model - using Gemini Flash for speed/cost
 const DEFAULT_MODEL = "google/gemini-2.0-flash-001";
+
+// ============================================
+// Cloud LLM Gateway
+// ============================================
+
+interface LLMMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface ToolCall {
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+interface LLMResponse {
+  text: string;
+  toolCalls?: ToolCall[];
+  finishReason?: string;
+}
+
+/**
+ * OpenAI-format tool definition for the API
+ */
+interface OpenAITool {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, any>;
+  };
+}
+
+/**
+ * Gateway configuration for cloud LLM calls
+ */
+interface GatewayConfig {
+  convexUrl: string;
+  jwt: string;
+}
+
+// Module-level gateway config (set by startThread/continueThread)
+let gatewayConfig: GatewayConfig | null = null;
 
 /**
  * Call the cloud Convex gateway for LLM completions.
  * This protects API keys by routing through the main cloud.
  */
-async function callCloudLLM(args: {
-  model?: string;
-  messages: Array<{ role: string; content: string }>;
-  tools?: Record<string, CoreTool>;
-  maxTokens?: number;
-  temperature?: number;
-}): Promise<{
-  text: string;
-  toolCalls?: Array<{ toolName: string; args: Record<string, unknown> }>;
-}> {
-  const convexUrl = process.env.CONVEX_URL;
-  const jwt = process.env.SANDBOX_JWT;
+async function callCloudLLM(
+  messages: LLMMessage[],
+  options: {
+    model?: string;
+    tools?: Array<{ name: string; description: string; parameters: any }>;
+    maxTokens?: number;
+    temperature?: number;
+  } = {}
+): Promise<LLMResponse> {
+  // Use module-level config (set by action handlers) or fall back to env
+  const convexUrl = gatewayConfig?.convexUrl || process.env.CONVEX_URL;
+  const jwt = gatewayConfig?.jwt || process.env.SANDBOX_JWT;
 
-  if (!convexUrl || !jwt) {
-    throw new Error("CONVEX_URL and SANDBOX_JWT must be set for cloud LLM calls");
+  if (!convexUrl) {
+    throw new Error("Gateway not configured: convexUrl missing. Pass gatewayConfig in context.");
+  }
+  if (!jwt) {
+    throw new Error("Gateway not configured: jwt missing. Pass gatewayConfig in context.");
   }
 
-  // Convert tools to OpenRouter format if provided
-  const toolsArray = args.tools ? Object.entries(args.tools).map(([name, tool]) => ({
-    type: "function",
+  // Convert simplified tool format to OpenAI format
+  const openAITools: OpenAITool[] | undefined = options.tools?.map((tool) => ({
+    type: "function" as const,
     function: {
-      name,
-      description: (tool as any).description || "",
-      parameters: (tool as any).parameters || {},
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters || { type: "object", properties: {} },
     },
-  })) : undefined;
+  }));
 
   const response = await fetch(`${convexUrl}/agent/call`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${jwt}`,
+      Authorization: `Bearer ${jwt}`,
     },
     body: JSON.stringify({
       path: "services.OpenRouter.internal.chatCompletion",
       args: {
-        model: args.model || DEFAULT_MODEL,
-        messages: args.messages,
-        tools: toolsArray,
-        maxTokens: args.maxTokens || 4096,
-        temperature: args.temperature,
-        speedy: false, // Use the specified model directly
+        model: options.model || DEFAULT_MODEL,
+        messages,
+        tools: openAITools,
+        maxTokens: options.maxTokens || 4096,
+        temperature: options.temperature,
+        speedy: false,
       },
     }),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Cloud LLM call failed: ${response.status} - ${error}`);
+    throw new Error(`Cloud LLM call failed (${response.status}): ${error}`);
   }
 
   const result = await response.json();
   if (!result.ok) {
-    throw new Error(`Cloud LLM error: ${result.error || "Unknown error"}`);
+    throw new Error(`Cloud LLM error: ${result.error || JSON.stringify(result)}`);
   }
 
   const data = result.data;
@@ -84,24 +131,18 @@ async function callCloudLLM(args: {
 
   // Extract tool calls if present
   const toolCalls = choice?.message?.tool_calls?.map((tc: any) => ({
-    toolName: tc.function.name,
-    args: JSON.parse(tc.function.arguments || "{}"),
+    toolName: tc.function?.name || tc.name,
+    args: typeof tc.function?.arguments === "string"
+      ? JSON.parse(tc.function.arguments)
+      : tc.function?.arguments || tc.arguments || {},
   }));
 
   return {
     text: choice?.message?.content || "",
-    toolCalls,
+    toolCalls: toolCalls?.length > 0 ? toolCalls : undefined,
+    finishReason: choice?.finish_reason,
   };
 }
-import { action, internalAction, query, mutation } from "../_generated/server";
-import { api, internal } from "../_generated/api";
-import { v } from "convex/values";
-
-// Import tool factory
-import { createAllTools } from "../tools";
-
-// Import prompts
-import { SYSTEM_PROMPT } from "../prompts/system";
 
 // ============================================
 // Types
@@ -117,24 +158,99 @@ interface AgentResult {
   }>;
 }
 
-interface RunResult {
-  status: "completed" | "incomplete";
-  threadId: string;
-  text?: string;
-  toolCalls?: AgentResult["toolCalls"];
-  checkpointId?: string;
-  durationMs: number;
+// ============================================
+// Thread Management
+// ============================================
+
+function createThreadId(): string {
+  return `thread_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 // ============================================
-// Thread Management (Simple implementation)
+// Tool Execution Loop
 // ============================================
 
 /**
- * Create a new thread ID
+ * Execute a multi-turn agent loop with tool calling.
+ * Handles the tool call -> execute -> respond cycle.
  */
-function createThreadId(): string {
-  return `thread_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+async function runAgentLoop(
+  ctx: any,
+  systemPrompt: string,
+  userPrompt: string,
+  maxSteps: number = 10
+): Promise<{ text: string; toolCalls: ToolCall[] }> {
+  // Build tool definitions for the LLM
+  const tools = createAllTools(ctx);
+  const toolDefs = Object.entries(tools).map(([name, tool]) => ({
+    name,
+    description: (tool as any).description || `Tool: ${name}`,
+    parameters: (tool as any).parameters || { type: "object", properties: {} },
+  }));
+
+  const messages: LLMMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+
+  const allToolCalls: ToolCall[] = [];
+  let finalText = "";
+
+  for (let step = 0; step < maxSteps; step++) {
+    // Call LLM via cloud gateway
+    const response = await callCloudLLM(messages, {
+      tools: toolDefs.length > 0 ? toolDefs : undefined,
+    });
+
+    // If no tool calls, we're done
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      finalText = response.text;
+      break;
+    }
+
+    // Execute tool calls
+    const toolResults: string[] = [];
+    for (const tc of response.toolCalls) {
+      allToolCalls.push(tc);
+
+      try {
+        const tool = tools[tc.toolName];
+        if (!tool) {
+          toolResults.push(`Error: Unknown tool "${tc.toolName}"`);
+          continue;
+        }
+
+        // Execute the tool
+        const result = await (tool as any).execute(tc.args, { toolCallId: `${step}-${tc.toolName}` });
+        toolResults.push(
+          typeof result === "string" ? result : JSON.stringify(result)
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        toolResults.push(`Error executing ${tc.toolName}: ${msg}`);
+      }
+    }
+
+    // Add assistant message with tool calls
+    messages.push({
+      role: "assistant",
+      content: response.text || `Called tools: ${response.toolCalls.map((t) => t.toolName).join(", ")}`,
+    });
+
+    // Add tool results as user message
+    messages.push({
+      role: "user",
+      content: `Tool results:\n${toolResults.join("\n\n")}`,
+    });
+
+    // Check if LLM indicated completion
+    if (response.finishReason === "stop") {
+      finalText = response.text;
+      break;
+    }
+  }
+
+  return { text: finalText, toolCalls: allToolCalls };
 }
 
 // ============================================
@@ -152,8 +268,14 @@ export const startThread = action({
   handler: async (ctx, args): Promise<AgentResult> => {
     const threadId = createThreadId();
 
-    // Create tools bound to this action context
-    const tools = createAllTools(ctx) as Record<string, CoreTool>;
+    // Set gateway config from context if provided
+    const ctxObj = args.context as { gatewayConfig?: GatewayConfig } | undefined;
+    console.log(`[lakitu agent] Received context: ${JSON.stringify(args.context)}`);
+    console.log(`[lakitu agent] gatewayConfig present: ${!!ctxObj?.gatewayConfig}`);
+    if (ctxObj?.gatewayConfig) {
+      gatewayConfig = ctxObj.gatewayConfig;
+      console.log(`[lakitu agent] Set gatewayConfig: convexUrl=${gatewayConfig.convexUrl}, jwt length=${gatewayConfig.jwt?.length}`);
+    }
 
     // Log the decision to start
     await ctx.runMutation(api.agent.decisions.log, {
@@ -165,36 +287,22 @@ export const startThread = action({
       expectedOutcome: "Agent will process the prompt and produce results",
     });
 
-    // Run the LLM with tools
-    const result = await generateText({
-      model: getOpenRouterModel(),
-      system: SYSTEM_PROMPT,
-      prompt: args.prompt,
-      tools,
-      maxSteps: 10,
-    });
-
-    // Extract tool calls from steps
-    const toolCalls = result.steps
-      .flatMap((step) => step.toolCalls || [])
-      .map((call) => ({
-        toolName: call.toolName,
-        args: call.args as Record<string, unknown>,
-        result: undefined, // Results are in toolResults
-      }));
+    // Run the agent loop
+    const result = await runAgentLoop(ctx, SYSTEM_PROMPT, args.prompt);
 
     return {
       threadId,
       text: result.text,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      toolCalls: result.toolCalls.map((tc) => ({
+        ...tc,
+        result: undefined,
+      })),
     };
   },
 });
 
 /**
  * Continue an existing thread
- * Note: In this simplified implementation, we don't persist thread history.
- * The full @convex-dev/agent implementation would handle this.
  */
 export const continueThread = action({
   args: {
@@ -202,31 +310,15 @@ export const continueThread = action({
     prompt: v.string(),
   },
   handler: async (ctx, args): Promise<AgentResult> => {
-    // Create tools bound to this action context
-    const tools = createAllTools(ctx) as Record<string, CoreTool>;
-
-    // Run the LLM with tools
-    const result = await generateText({
-      model: getOpenRouterModel(),
-      system: SYSTEM_PROMPT,
-      prompt: args.prompt,
-      tools,
-      maxSteps: 10,
-    });
-
-    // Extract tool calls from steps
-    const toolCalls = result.steps
-      .flatMap((step) => step.toolCalls || [])
-      .map((call) => ({
-        toolName: call.toolName,
-        args: call.args as Record<string, unknown>,
-        result: undefined,
-      }));
+    const result = await runAgentLoop(ctx, SYSTEM_PROMPT, args.prompt);
 
     return {
       threadId: args.threadId,
       text: result.text,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      toolCalls: result.toolCalls.map((tc) => ({
+        ...tc,
+        result: undefined,
+      })),
     };
   },
 });
@@ -241,14 +333,10 @@ export const runWithTimeout = internalAction({
     timeoutMs: v.number(),
     checkpointId: v.optional(v.id("checkpoints")),
   },
-  handler: async (ctx, args): Promise<RunResult> => {
+  handler: async (ctx, args) => {
     const startTime = Date.now();
     const timeout = args.timeoutMs;
 
-    // Create tools bound to this action context
-    const tools = createAllTools(ctx) as Record<string, CoreTool>;
-
-    // Restore from checkpoint if continuing
     let threadId: string;
 
     if (args.checkpointId) {
@@ -261,7 +349,6 @@ export const runWithTimeout = internalAction({
       }
       threadId = checkpoint.threadId;
 
-      // Restore state from checkpoint
       await ctx.runMutation(internal.state.files.restoreFromCheckpoint, {
         checkpointId: args.checkpointId,
       });
@@ -269,43 +356,26 @@ export const runWithTimeout = internalAction({
       threadId = createThreadId();
     }
 
-    // Run with timeout check
     try {
       const result = await Promise.race([
-        generateText({
-          model: getOpenRouterModel(),
-          system: SYSTEM_PROMPT,
-          prompt: args.prompt,
-          tools,
-          maxSteps: 10,
-        }),
+        runAgentLoop(ctx, SYSTEM_PROMPT, args.prompt),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("TIMEOUT")), timeout)
         ),
       ]);
 
-      // Extract tool calls
-      const toolCalls = result.steps
-        .flatMap((step) => step.toolCalls || [])
-        .map((call) => ({
-          toolName: call.toolName,
-          args: call.args as Record<string, unknown>,
-          result: undefined,
-        }));
-
-      // Success - return results
       return {
-        status: "completed",
+        status: "completed" as const,
         threadId,
         text: result.text,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        toolCalls: result.toolCalls,
         durationMs: Date.now() - startTime,
       };
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+
       if (errorMessage === "TIMEOUT") {
-        // Create checkpoint for continuation
         const checkpointId = await ctx.runMutation(
           internal.state.checkpoints.createFromCurrentState,
           {
@@ -322,7 +392,7 @@ export const runWithTimeout = internalAction({
         );
 
         return {
-          status: "incomplete",
+          status: "incomplete" as const,
           threadId,
           checkpointId,
           durationMs: Date.now() - startTime,
@@ -337,27 +407,16 @@ export const runWithTimeout = internalAction({
 // Queries
 // ============================================
 
-/**
- * Get thread messages
- * Note: In the simplified implementation, this returns an empty array.
- * The full @convex-dev/agent implementation would return message history.
- */
 export const getThreadMessages = query({
   args: { threadId: v.string() },
   handler: async (_ctx, _args): Promise<Array<{ role: string; content: string }>> => {
-    // TODO: Implement message persistence when using full agent component
     return [];
   },
 });
 
-/**
- * Get streaming deltas
- * Note: Simplified implementation - returns empty.
- */
 export const getStreamDeltas = query({
   args: { threadId: v.string(), since: v.optional(v.number()) },
   handler: async (_ctx, _args): Promise<Array<{ delta: string; timestamp: number }>> => {
-    // TODO: Implement streaming when using full agent component
     return [];
   },
 });

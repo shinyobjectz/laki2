@@ -2,7 +2,7 @@
  * Subagents - Spawn and manage child agents
  *
  * Enables parallel work and task delegation through subagent spawning.
- * Uses AI SDK directly for LLM calls.
+ * Uses cloud gateway for LLM calls (same as main agent).
  */
 
 import {
@@ -13,14 +13,113 @@ import {
 } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { generateText, type CoreTool } from "ai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createSubagentToolset } from "../tools";
 
-// Initialize OpenRouter provider
-const openrouter = createOpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
+// Default model for subagents
+const DEFAULT_MODEL = "google/gemini-2.0-flash-001";
+
+// ============================================
+// Cloud LLM Gateway (shared with main agent)
+// ============================================
+
+interface LLMMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface ToolCall {
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+interface LLMResponse {
+  text: string;
+  toolCalls?: ToolCall[];
+  finishReason?: string;
+}
+
+interface OpenAITool {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, any>;
+  };
+}
+
+/**
+ * Call the cloud Convex gateway for LLM completions.
+ */
+async function callCloudLLM(
+  messages: LLMMessage[],
+  options: {
+    model?: string;
+    tools?: Array<{ name: string; description: string; parameters: any }>;
+    maxTokens?: number;
+    temperature?: number;
+  } = {}
+): Promise<LLMResponse> {
+  const convexUrl = process.env.CONVEX_URL;
+  const jwt = process.env.SANDBOX_JWT;
+
+  if (!convexUrl || !jwt) {
+    throw new Error("CONVEX_URL or SANDBOX_JWT not set");
+  }
+
+  const openAITools: OpenAITool[] | undefined = options.tools?.map((tool) => ({
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters || { type: "object", properties: {} },
+    },
+  }));
+
+  const response = await fetch(`${convexUrl}/agent/call`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${jwt}`,
+    },
+    body: JSON.stringify({
+      path: "services.OpenRouter.internal.chatCompletion",
+      args: {
+        model: options.model || DEFAULT_MODEL,
+        messages,
+        tools: openAITools,
+        maxTokens: options.maxTokens || 4096,
+        temperature: options.temperature,
+        speedy: false,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Cloud LLM call failed (${response.status}): ${error}`);
+  }
+
+  const result = await response.json();
+  if (!result.ok) {
+    throw new Error(`Cloud LLM error: ${result.error || JSON.stringify(result)}`);
+  }
+
+  const data = result.data;
+  const choice = data.choices?.[0];
+
+  const toolCalls = choice?.message?.tool_calls?.map((tc: any) => ({
+    toolName: tc.function?.name || tc.name,
+    args: typeof tc.function?.arguments === "string"
+      ? JSON.parse(tc.function.arguments)
+      : tc.function?.arguments || tc.arguments || {},
+  }));
+
+  return {
+    text: choice?.message?.content || "",
+    toolCalls: toolCalls?.length > 0 ? toolCalls : undefined,
+    finishReason: choice?.finish_reason,
+  };
+}
 
 // ============================================
 // Types
@@ -86,6 +185,82 @@ export const spawn = internalAction({
 });
 
 /**
+ * Execute subagent task with tool loop
+ */
+async function runSubagentLoop(
+  ctx: any,
+  systemPrompt: string,
+  task: string,
+  toolNames: string[],
+  model: string,
+  maxSteps: number = 5
+): Promise<{ text: string; toolCalls: ToolCall[] }> {
+  // Create tools for this subagent
+  const tools = createSubagentToolset(ctx, toolNames);
+  const toolDefs = Object.entries(tools).map(([name, tool]) => ({
+    name,
+    description: (tool as any).description || `Tool: ${name}`,
+    parameters: (tool as any).parameters || { type: "object", properties: {} },
+  }));
+
+  const messages: LLMMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: task },
+  ];
+
+  const allToolCalls: ToolCall[] = [];
+  let finalText = "";
+
+  for (let step = 0; step < maxSteps; step++) {
+    const response = await callCloudLLM(messages, {
+      model,
+      tools: toolDefs.length > 0 ? toolDefs : undefined,
+    });
+
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      finalText = response.text;
+      break;
+    }
+
+    const toolResults: string[] = [];
+    for (const tc of response.toolCalls) {
+      allToolCalls.push(tc);
+
+      try {
+        const tool = tools[tc.toolName];
+        if (!tool) {
+          toolResults.push(`Error: Unknown tool "${tc.toolName}"`);
+          continue;
+        }
+
+        const result = await (tool as any).execute(tc.args, { toolCallId: `${step}-${tc.toolName}` });
+        toolResults.push(typeof result === "string" ? result : JSON.stringify(result));
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        toolResults.push(`Error executing ${tc.toolName}: ${msg}`);
+      }
+    }
+
+    messages.push({
+      role: "assistant",
+      content: response.text || `Called tools: ${response.toolCalls.map((t) => t.toolName).join(", ")}`,
+    });
+
+    messages.push({
+      role: "user",
+      content: `Tool results:\n${toolResults.join("\n\n")}`,
+    });
+
+    if (response.finishReason === "stop") {
+      finalText = response.text;
+      break;
+    }
+  }
+
+  return { text: finalText, toolCalls: allToolCalls };
+}
+
+/**
  * Execute subagent task
  */
 export const execute = internalAction({
@@ -104,12 +279,6 @@ export const execute = internalAction({
         status: "running",
       });
 
-      // Create tools for this subagent
-      const tools = createSubagentToolset(ctx, args.tools) as Record<
-        string,
-        CoreTool
-      >;
-
       // Build system prompt for subagent
       const systemPrompt = `You are ${args.name}, a specialized subagent.
 
@@ -121,22 +290,15 @@ Guidelines:
 - Report results clearly
 - If blocked, explain why`;
 
-      // Execute using AI SDK with OpenRouter
-      const result = await generateText({
-        model: openrouter(args.model),
-        system: systemPrompt,
-        prompt: args.task,
-        tools,
-        maxSteps: 5,
-      });
-
-      // Extract tool calls
-      const toolCalls = result.steps
-        .flatMap((step) => step.toolCalls || [])
-        .map((call) => ({
-          toolName: call.toolName,
-          args: call.args,
-        }));
+      // Execute using cloud gateway
+      const result = await runSubagentLoop(
+        ctx,
+        systemPrompt,
+        args.task,
+        args.tools,
+        args.model || DEFAULT_MODEL,
+        5
+      );
 
       // Update with result
       await ctx.runMutation(internal.agent.subagents.updateStatus, {
@@ -144,7 +306,7 @@ Guidelines:
         status: "completed",
         result: {
           text: result.text,
-          toolCalls,
+          toolCalls: result.toolCalls,
         },
       });
 
