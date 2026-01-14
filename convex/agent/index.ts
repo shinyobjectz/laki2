@@ -14,20 +14,84 @@
  * component is properly configured.
  */
 
-import { generateText, type CoreTool } from "ai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateText, type CoreTool, type CoreMessage } from "ai";
 
 // Default model - using Gemini Flash for speed/cost
 const DEFAULT_MODEL = "google/gemini-2.0-flash-001";
 
-// Create OpenRouter provider lazily to ensure env var is available at runtime
-function getOpenRouterModel(modelId: string = DEFAULT_MODEL) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY environment variable is not set");
+/**
+ * Call the cloud Convex gateway for LLM completions.
+ * This protects API keys by routing through the main cloud.
+ */
+async function callCloudLLM(args: {
+  model?: string;
+  messages: Array<{ role: string; content: string }>;
+  tools?: Record<string, CoreTool>;
+  maxTokens?: number;
+  temperature?: number;
+}): Promise<{
+  text: string;
+  toolCalls?: Array<{ toolName: string; args: Record<string, unknown> }>;
+}> {
+  const convexUrl = process.env.CONVEX_URL;
+  const jwt = process.env.SANDBOX_JWT;
+
+  if (!convexUrl || !jwt) {
+    throw new Error("CONVEX_URL and SANDBOX_JWT must be set for cloud LLM calls");
   }
-  const openrouter = createOpenRouter({ apiKey });
-  return openrouter(modelId);
+
+  // Convert tools to OpenRouter format if provided
+  const toolsArray = args.tools ? Object.entries(args.tools).map(([name, tool]) => ({
+    type: "function",
+    function: {
+      name,
+      description: (tool as any).description || "",
+      parameters: (tool as any).parameters || {},
+    },
+  })) : undefined;
+
+  const response = await fetch(`${convexUrl}/agent/call`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${jwt}`,
+    },
+    body: JSON.stringify({
+      path: "services.OpenRouter.internal.chatCompletion",
+      args: {
+        model: args.model || DEFAULT_MODEL,
+        messages: args.messages,
+        tools: toolsArray,
+        maxTokens: args.maxTokens || 4096,
+        temperature: args.temperature,
+        speedy: false, // Use the specified model directly
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Cloud LLM call failed: ${response.status} - ${error}`);
+  }
+
+  const result = await response.json();
+  if (!result.ok) {
+    throw new Error(`Cloud LLM error: ${result.error || "Unknown error"}`);
+  }
+
+  const data = result.data;
+  const choice = data.choices?.[0];
+
+  // Extract tool calls if present
+  const toolCalls = choice?.message?.tool_calls?.map((tc: any) => ({
+    toolName: tc.function.name,
+    args: JSON.parse(tc.function.arguments || "{}"),
+  }));
+
+  return {
+    text: choice?.message?.content || "",
+    toolCalls,
+  };
 }
 import { action, internalAction, query, mutation } from "../_generated/server";
 import { api, internal } from "../_generated/api";
@@ -103,7 +167,7 @@ export const startThread = action({
 
     // Run the LLM with tools
     const result = await generateText({
-      model: openrouter(DEFAULT_MODEL),
+      model: getOpenRouterModel(),
       system: SYSTEM_PROMPT,
       prompt: args.prompt,
       tools,
@@ -143,7 +207,7 @@ export const continueThread = action({
 
     // Run the LLM with tools
     const result = await generateText({
-      model: openrouter(DEFAULT_MODEL),
+      model: getOpenRouterModel(),
       system: SYSTEM_PROMPT,
       prompt: args.prompt,
       tools,
@@ -209,7 +273,7 @@ export const runWithTimeout = internalAction({
     try {
       const result = await Promise.race([
         generateText({
-          model: openrouter(DEFAULT_MODEL),
+          model: getOpenRouterModel(),
           system: SYSTEM_PROMPT,
           prompt: args.prompt,
           tools,
