@@ -1,0 +1,13 @@
+# E2B Sandbox Template Configuration
+# This defines the Lakitu template for E2B
+
+template_id = "425fw6bbagygha8j41lt"
+template_name = "lakitu"
+dockerfile = "Dockerfile"
+
+# Start command runs the sandbox agent
+start_cmd = "/home/user/start.sh"
+
+# CPU and memory
+vcpus = 2
+memory_mb = 2048
