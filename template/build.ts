@@ -210,7 +210,9 @@ const customTemplate = (baseId: string, buildDir: string) => Template()
     export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \
     cd /home/user/lakitu && bun install && \
     sudo cp /home/user/lakitu/runtime/generate-pdf /usr/local/bin/generate-pdf && \
-    sudo chmod +x /usr/local/bin/generate-pdf
+    sudo chmod +x /usr/local/bin/generate-pdf && \
+    cp -r /home/user/lakitu/ksa /home/user/ksa && \
+    chown -R user:user /home/user/ksa
   `)
   // Verify state was copied (including sqlite db!)
   .runCmd(`
