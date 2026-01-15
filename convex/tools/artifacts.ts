@@ -97,7 +97,7 @@ export function createArtifactTools(ctx: ActionCtx) {
         name: z.string().describe("Name for the artifact (e.g. 'Important Info.md')"),
         content: z.string().optional().describe("Content to save (for text artifacts)"),
         path: z.string().optional().describe("Path to file to save as artifact"),
-        type: z.string().default("text/markdown").describe("Type: text/markdown, json, csv. NOT pdf - use pdf_create for PDFs"),
+        type: z.string().default("markdown").describe("Type: markdown, json, csv, text. NOT pdf - use pdf_create for PDFs"),
         metadata: z.record(z.any()).optional(),
       }),
       execute: async (args) => {
