@@ -7,7 +7,20 @@
 
 // KSA registry info (inlined to avoid importing Node.js modules that Convex can't bundle)
 const CORE_KSAS = ["file", "context", "artifacts", "beads"];
-const ALL_KSA_NAMES = ["file", "context", "artifacts", "beads", "web", "news", "social", "companies", "browser", "pdf", "email"];
+const ALL_KSA_NAMES = [
+  // Core
+  "file", "context", "artifacts", "beads",
+  // General research
+  "web", "news", "social", "companies", "browser",
+  // Platform-specific social
+  "instagram", "tiktok", "youtube", "linkedin", "twitter",
+  // Ads
+  "meta-ads", "linkedin-ads", "google-ads", "tiktok-ads",
+  // Influencer
+  "influencer-search", "influencer-analytics",
+  // Deliverables
+  "pdf", "email"
+];
 
 /**
  * KSA detailed examples for the system prompt
@@ -184,6 +197,172 @@ await sendWithAttachment(
   'Please find the report attached.',
   { content: base64Content, filename: 'report.pdf', type: 'application/pdf' }
 );
+\`\`\``,
+
+  // Platform-specific organic social KSAs
+  instagram: `### Instagram KSA (\`./ksa/instagram\`) - Organic content research
+\`\`\`typescript
+import { getProfile, getPosts, getReels, searchHashtags, analyzeEngagement } from './ksa/instagram';
+
+// Get creator profile
+const profile = await getProfile('username');
+console.log(profile.followers, profile.engagement);
+
+// Get recent posts
+const posts = await getPosts('username', 10);
+posts.forEach(post => console.log(post.likes, post.caption));
+
+// Search hashtags for content
+const tagged = await searchHashtags('marketing', 20);
+\`\`\``,
+
+  tiktok: `### TikTok KSA (\`./ksa/tiktok\`) - Viral content analysis
+\`\`\`typescript
+import { getCreator, getVideos, getTrending, searchSounds, analyzeViralContent } from './ksa/tiktok';
+
+// Get creator info
+const creator = await getCreator('username');
+console.log(creator.followers, creator.likes);
+
+// Get their videos
+const videos = await getVideos('username', 15);
+
+// Find trending content
+const trending = await getTrending('category');
+\`\`\``,
+
+  youtube: `### YouTube KSA (\`./ksa/youtube\`) - Channel and video analysis
+\`\`\`typescript
+import { getChannel, getVideos, getShorts, searchVideos, analyzePerformance } from './ksa/youtube';
+
+// Get channel info
+const channel = await getChannel('channelId');
+console.log(channel.subscribers, channel.viewCount);
+
+// Get recent videos
+const videos = await getVideos('channelId', 10);
+
+// Search for videos
+const results = await searchVideos('AI tutorials', 20);
+\`\`\``,
+
+  linkedin: `### LinkedIn KSA (\`./ksa/linkedin\`) - B2B professional research
+\`\`\`typescript
+import { getProfile, getCompanyPage, getPosts, searchPeople, analyzeNetwork } from './ksa/linkedin';
+
+// Get professional profile
+const profile = await getProfile('linkedin-url');
+console.log(profile.headline, profile.connections);
+
+// Get company page
+const company = await getCompanyPage('company-url');
+
+// Search for professionals
+const people = await searchPeople({ title: 'VP Marketing', industry: 'SaaS' });
+\`\`\``,
+
+  twitter: `### Twitter KSA (\`./ksa/twitter\`) - Real-time social listening
+\`\`\`typescript
+import { getProfile, getTweets, getThreads, searchTweets, analyzeSentiment } from './ksa/twitter';
+
+// Get profile
+const profile = await getProfile('username');
+console.log(profile.followers, profile.verified);
+
+// Get recent tweets
+const tweets = await getTweets('username', 20);
+
+// Search tweets
+const results = await searchTweets('brand mention', 50);
+\`\`\``,
+
+  // Ads KSAs
+  "meta-ads": `### Meta Ads KSA (\`./ksa/meta-ads\`) - Facebook/Instagram advertising
+\`\`\`typescript
+import { searchAds, getAdLibrary, analyzeCreatives, getCompetitorAds, estimateSpend } from './ksa/meta-ads';
+
+// Search Meta Ad Library
+const ads = await searchAds({ query: 'competitor', platforms: ['facebook', 'instagram'] });
+
+// Get competitor ads
+const competitorAds = await getCompetitorAds('competitor-page-id');
+
+// Analyze ad creatives
+const analysis = await analyzeCreatives(ads.slice(0, 10));
+\`\`\``,
+
+  "linkedin-ads": `### LinkedIn Ads KSA (\`./ksa/linkedin-ads\`) - B2B advertising
+\`\`\`typescript
+import { searchSponsored, analyzeTargeting, getCompanyAds, benchmarkPerformance } from './ksa/linkedin-ads';
+
+// Search sponsored content
+const sponsored = await searchSponsored({ industry: 'Technology', region: 'US' });
+
+// Get company's ads
+const companyAds = await getCompanyAds('company-id');
+
+// Benchmark against industry
+const benchmark = await benchmarkPerformance(companyAds);
+\`\`\``,
+
+  "google-ads": `### Google Ads KSA (\`./ksa/google-ads\`) - Search and display advertising
+\`\`\`typescript
+import { searchKeywords, getDisplayAds, analyzeYouTubeAds, getCompetitorKeywords, estimateCPC } from './ksa/google-ads';
+
+// Research keywords
+const keywords = await searchKeywords({ seed: 'crm software', limit: 50 });
+
+// Get competitor keywords
+const competitorKeywords = await getCompetitorKeywords('competitor.com');
+
+// Estimate CPC
+const cpc = await estimateCPC(['crm', 'project management', 'sales automation']);
+\`\`\``,
+
+  "tiktok-ads": `### TikTok Ads KSA (\`./ksa/tiktok-ads\`) - Short-form video advertising
+\`\`\`typescript
+import { searchAds, getSparkAds, analyzeCreatives, getTrendingAds, benchmarkCPM } from './ksa/tiktok-ads';
+
+// Search TikTok ads
+const ads = await searchAds({ category: 'ecommerce', audience: 'genz' });
+
+// Get Spark Ads (boosted organic)
+const sparkAds = await getSparkAds({ brand: 'brand-name' });
+
+// Get trending ad formats
+const trending = await getTrendingAds();
+\`\`\``,
+
+  // Influencer KSAs
+  "influencer-search": `### Influencer Search KSA (\`./ksa/influencer-search\`) - Creator discovery
+\`\`\`typescript
+import { searchByNiche, searchByHashtag, searchByLocation, filterByFollowers, rankByEngagement } from './ksa/influencer-search';
+
+// Find influencers by niche
+const fitness = await searchByNiche('fitness', { platforms: ['instagram', 'tiktok'] });
+
+// Filter by follower count
+const micro = await filterByFollowers(fitness, { min: 10000, max: 100000 });
+
+// Rank by engagement rate
+const ranked = await rankByEngagement(micro);
+console.log(ranked.slice(0, 10));
+\`\`\``,
+
+  "influencer-analytics": `### Influencer Analytics KSA (\`./ksa/influencer-analytics\`) - Creator performance
+\`\`\`typescript
+import { calculateEngagement, analyzeGrowth, estimateReach, checkAuthenticity, getAudienceDemographics } from './ksa/influencer-analytics';
+
+// Calculate engagement rate
+const engagement = await calculateEngagement('username', 'instagram');
+console.log('Engagement:', engagement.rate);
+
+// Check for fake followers
+const authenticity = await checkAuthenticity('username');
+console.log('Authenticity score:', authenticity.score);
+
+// Get audience demographics
+const demographics = await getAudienceDemographics('username');
 \`\`\``,
 };
 
@@ -363,3 +542,115 @@ export function getCodeExecSystemPrompt(options?: {
 
 // For backwards compatibility - the full prompt with all KSAs
 export const CODE_EXEC_SYSTEM_PROMPT = getCodeExecSystemPrompt();
+
+// ============================================================================
+// KSA Instructions Generation
+// ============================================================================
+
+/** Display names for KSAs */
+const KSA_DISPLAY_NAMES: Record<string, string> = {
+  web: "Web Research",
+  news: "News Monitoring",
+  social: "Social Media",
+  companies: "Company Intelligence",
+  browser: "Browser Automation",
+  pdf: "PDF Generation",
+  email: "Email",
+  file: "File Operations",
+  artifacts: "Artifacts",
+  context: "Context",
+  beads: "Task Tracking",
+};
+
+/**
+ * Generate system prompt additions from skill configurations.
+ * This embeds user-specific instructions and config settings into the system prompt
+ * so the agent knows how to use each KSA according to user preferences.
+ *
+ * @param skillConfigs - Map of KSA name to user config (e.g., { web: { depth: 'thorough', instructions: '...' } })
+ * @returns String to add to system prompt, or empty string if no configs
+ */
+export function generateKSAInstructions(
+  skillConfigs: Record<string, Record<string, unknown>>
+): string {
+  const sections: string[] = [];
+
+  for (const [ksaName, config] of Object.entries(skillConfigs)) {
+    // Skip if no meaningful config (only _isPreset/_baseKSA markers or empty)
+    const meaningfulKeys = Object.keys(config).filter(
+      (k) => !k.startsWith("_")
+    );
+    if (meaningfulKeys.length === 0) continue;
+
+    // Skip if only has instructions that's empty
+    if (
+      meaningfulKeys.length === 1 &&
+      meaningfulKeys[0] === "instructions" &&
+      !config.instructions
+    ) {
+      continue;
+    }
+
+    const displayName = KSA_DISPLAY_NAMES[ksaName] || ksaName;
+    const lines: string[] = [`### ${displayName} Configuration`];
+    lines.push(`When using the ${ksaName} KSA:`);
+
+    // Add user instructions first (most important)
+    if (config.instructions && typeof config.instructions === "string") {
+      lines.push(`- **User Instructions:** ${config.instructions}`);
+    }
+
+    // Add relevant config settings
+    if (config.depth) {
+      lines.push(`- Research depth: ${config.depth}`);
+    }
+    if (config.searchType) {
+      lines.push(`- Search type: ${config.searchType}`);
+    }
+    if (config.fastMode !== undefined) {
+      lines.push(`- Fast mode: ${config.fastMode ? "enabled" : "disabled"}`);
+    }
+    if (Array.isArray(config.platforms) && config.platforms.length > 0) {
+      lines.push(`- Platforms: ${config.platforms.join(", ")}`);
+    }
+    if (Array.isArray(config.contentTypes) && config.contentTypes.length > 0) {
+      lines.push(`- Content types: ${config.contentTypes.join(", ")}`);
+    }
+    if (config.postsLimit) {
+      lines.push(`- Posts limit: ${config.postsLimit}`);
+    }
+    if (config.enrichmentLevel) {
+      lines.push(`- Enrichment level: ${config.enrichmentLevel}`);
+    }
+    if (config.includeTechStack !== undefined) {
+      lines.push(
+        `- Include tech stack: ${config.includeTechStack ? "yes" : "no"}`
+      );
+    }
+    if (config.template) {
+      lines.push(`- Template: ${config.template}`);
+    }
+    if (config.pageSize) {
+      lines.push(`- Page size: ${config.pageSize}`);
+    }
+    if (config.sandboxMode !== undefined) {
+      lines.push(
+        `- Sandbox mode: ${config.sandboxMode ? "enabled (test only)" : "disabled (live)"}`
+      );
+    }
+    if (Array.isArray(config.includeSources) && config.includeSources.length > 0) {
+      lines.push(`- Include sources: ${config.includeSources.join(", ")}`);
+    }
+    if (Array.isArray(config.excludeSources) && config.excludeSources.length > 0) {
+      lines.push(`- Exclude sources: ${config.excludeSources.join(", ")}`);
+    }
+
+    sections.push(lines.join("\n"));
+  }
+
+  if (sections.length === 0) {
+    return "";
+  }
+
+  return `## Skill Configurations\n\nThe following KSAs have been configured with specific settings for this task:\n\n${sections.join("\n\n")}`;
+}

@@ -40,6 +40,33 @@ export { saveArtifact, readArtifact, listArtifacts } from "./artifacts";
 // KSA Registry Types
 // ============================================================================
 
+import {
+  CONFIG_SCHEMAS,
+  CONFIG_DEFAULTS,
+  KSA_PRESETS,
+  type ConfigField,
+  type PresetDefinition,
+  getConfigSchema as _getConfigSchema,
+  getConfigDefaults as _getConfigDefaults,
+  getPreset as _getPreset,
+  getPresetsForKSA as _getPresetsForKSA,
+  resolvePreset as _resolvePreset,
+} from "./_shared/configSchemas";
+
+// Re-export config utilities
+export {
+  type ConfigField,
+  type PresetDefinition,
+  CONFIG_SCHEMAS,
+  CONFIG_DEFAULTS,
+  KSA_PRESETS,
+};
+export const getConfigSchema = _getConfigSchema;
+export const getConfigDefaults = _getConfigDefaults;
+export const getPreset = _getPreset;
+export const getPresetsForKSA = _getPresetsForKSA;
+export const resolvePreset = _resolvePreset;
+
 export type KSACategory = "core" | "skills" | "deliverables";
 
 export interface KSAInfo {
@@ -52,6 +79,12 @@ export interface KSAInfo {
   servicePaths?: string[];
   /** Whether this KSA runs locally (no cloud calls) */
   isLocal?: boolean;
+  /** Icon for UI display (mdi: format) */
+  icon?: string;
+  /** Configuration schema for this KSA */
+  configSchema?: Record<string, ConfigField>;
+  /** Default configuration values */
+  defaults?: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -73,6 +106,7 @@ export const KSA_REGISTRY: KSAInfo[] = [
     functions: ["read", "write", "edit", "glob", "grep", "ls"],
     importPath: "./ksa/file",
     isLocal: true,
+    icon: "mdi:file-document-outline",
   },
   {
     name: "context",
@@ -81,6 +115,7 @@ export const KSA_REGISTRY: KSAInfo[] = [
     functions: ["getContext", "setVariable", "getVariable"],
     importPath: "./ksa/context",
     servicePaths: ["features.kanban.executor.getCardContext", "features.kanban.executor.setCardVariable"],
+    icon: "mdi:database-outline",
   },
   {
     name: "artifacts",
@@ -93,6 +128,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
       "features.kanban.artifacts.getArtifact",
       "features.kanban.artifacts.listCardArtifacts",
     ],
+    icon: "mdi:package-variant-closed",
+    configSchema: CONFIG_SCHEMAS.artifacts,
+    defaults: CONFIG_DEFAULTS.artifacts,
   },
   {
     name: "beads",
@@ -101,6 +139,7 @@ export const KSA_REGISTRY: KSAInfo[] = [
     functions: ["create", "update", "close", "list", "getReady", "get"],
     importPath: "./ksa/beads",
     isLocal: true,
+    icon: "mdi:checkbox-multiple-outline",
   },
 
   // =========================================================================
@@ -116,6 +155,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
       "services.Valyu.internal.search",
       "services.APITube.internal.search",
     ],
+    icon: "mdi:web",
+    configSchema: CONFIG_SCHEMAS.web,
+    defaults: CONFIG_DEFAULTS.web,
   },
   {
     name: "news",
@@ -132,6 +174,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
     ],
     importPath: "./ksa/news",
     servicePaths: ["services.APITube.internal.call"],
+    icon: "mdi:newspaper",
+    configSchema: CONFIG_SCHEMAS.news,
+    defaults: CONFIG_DEFAULTS.news,
   },
   {
     name: "social",
@@ -150,6 +195,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
     ],
     importPath: "./ksa/social",
     servicePaths: ["services.ScrapeCreators.internal.call"],
+    icon: "mdi:account-group",
+    configSchema: CONFIG_SCHEMAS.social,
+    defaults: CONFIG_DEFAULTS.social,
   },
   {
     name: "companies",
@@ -166,6 +214,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
     ],
     importPath: "./ksa/companies",
     servicePaths: ["services.TheCompanies.internal.call"],
+    icon: "mdi:office-building",
+    configSchema: CONFIG_SCHEMAS.companies,
+    defaults: CONFIG_DEFAULTS.companies,
   },
   {
     name: "browser",
@@ -174,6 +225,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
     functions: ["open", "screenshot", "click", "type", "getText", "getHtml", "closeBrowser"],
     importPath: "./ksa/browser",
     isLocal: true,
+    icon: "mdi:web-box",
+    configSchema: CONFIG_SCHEMAS.browser,
+    defaults: CONFIG_DEFAULTS.browser,
   },
 
   // =========================================================================
@@ -186,6 +240,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
     functions: ["generate"],
     importPath: "./ksa/pdf",
     isLocal: true,
+    icon: "mdi:file-pdf-box",
+    configSchema: CONFIG_SCHEMAS.pdf,
+    defaults: CONFIG_DEFAULTS.pdf,
   },
   {
     name: "email",
@@ -194,6 +251,9 @@ export const KSA_REGISTRY: KSAInfo[] = [
     functions: ["send", "sendText", "sendHtml", "sendWithAttachment", "sendTemplate", "sendBulk"],
     importPath: "./ksa/email",
     servicePaths: ["services.SendGrid.internal.send"],
+    icon: "mdi:email-outline",
+    configSchema: CONFIG_SCHEMAS.email,
+    defaults: CONFIG_DEFAULTS.email,
   },
 ];
 

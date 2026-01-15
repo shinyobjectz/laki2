@@ -697,7 +697,7 @@ export const getChainOfThoughtSteps = query({
 // ============================================
 
 import { runCodeExecLoop, getSteps } from "./codeExecLoop";
-import { getCodeExecSystemPrompt } from "../prompts/codeExec";
+import { getCodeExecSystemPrompt, generateKSAInstructions } from "../prompts/codeExec";
 
 /**
  * Start a thread using code execution mode.
@@ -717,13 +717,14 @@ export const startCodeExecThread = action({
   handler: async (ctx, args) => {
     const threadId = `codeexec_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-    // Extract gateway config, model, sessionId, and allowedKSAs from context
+    // Extract gateway config, model, sessionId, allowedKSAs, and skillConfigs from context
     const ctxObj = args.context as {
       gatewayConfig?: { convexUrl: string; jwt: string };
       cardId?: string;
       model?: string;
       sessionId?: string; // For real-time log forwarding
       allowedKSAs?: string[]; // KSAs allowed for this task
+      skillConfigs?: Record<string, Record<string, unknown>>; // Per-KSA configuration
     } | undefined;
 
     if (!ctxObj?.gatewayConfig) {
@@ -740,9 +741,15 @@ export const startCodeExecThread = action({
       expectedOutcome: "Agent will generate code that imports from skills/",
     });
 
+    // Generate KSA instructions from skill configs (if any)
+    const ksaInstructions = ctxObj.skillConfigs
+      ? generateKSAInstructions(ctxObj.skillConfigs)
+      : "";
+
     // Run the code execution loop with dynamic KSA documentation
     const systemPrompt = getCodeExecSystemPrompt({
       allowedKSAs: ctxObj.allowedKSAs,
+      additions: ksaInstructions || undefined,
     });
     const result = await runCodeExecLoop(ctx, systemPrompt, args.prompt, ctxObj.gatewayConfig, {
       threadId,
