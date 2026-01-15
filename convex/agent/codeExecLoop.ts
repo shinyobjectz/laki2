@@ -15,7 +15,7 @@
  */
 
 import { internal } from "../_generated/api";
-import { extractCodeBlocks, wrapCodeForExecution } from "../actions/codeExec";
+import { extractCodeBlocks, wrapCodeForExecution } from "../utils/codeExecHelpers";
 import type { ChainOfThoughtStep, StepStatus } from "../../shared/chain-of-thought";
 import { createStepId } from "../../shared/chain-of-thought";
 

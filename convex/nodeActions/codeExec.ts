@@ -10,13 +10,6 @@
 
 import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
-import { exec } from "child_process";
-import { promisify } from "util";
-import * as fs from "fs/promises";
-import * as path from "path";
-import * as crypto from "crypto";
-
-const execAsync = promisify(exec);
 
 // Execution limits
 const MAX_TIMEOUT_MS = 120_000; // 2 minutes
@@ -39,6 +32,13 @@ export const execute = internalAction({
     error?: string;
     exitCode: number;
   }> => {
+    // Dynamic imports for Node.js modules (required for Convex bundling)
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const fs = await import("fs/promises");
+    const crypto = await import("crypto");
+
+    const execAsync = promisify(exec);
     const timeout = Math.min(args.timeoutMs || 60_000, MAX_TIMEOUT_MS);
 
     // Generate unique filename for this execution
@@ -110,49 +110,3 @@ export const execute = internalAction({
     }
   },
 });
-
-/**
- * Extract code blocks from LLM response text.
- *
- * Supports:
- * - ```typescript ... ```
- * - ```ts ... ```
- * - ```javascript ... ```
- * - ```js ... ```
- * - ``` ... ``` (unmarked, treated as TypeScript)
- */
-export function extractCodeBlocks(text: string): string[] {
-  const blocks: string[] = [];
-
-  // Match fenced code blocks
-  const fenceRegex = /```(?:typescript|ts|javascript|js)?\s*\n([\s\S]*?)```/g;
-  let match;
-
-  while ((match = fenceRegex.exec(text)) !== null) {
-    const code = match[1].trim();
-    if (code.length > 0) {
-      blocks.push(code);
-    }
-  }
-
-  return blocks;
-}
-
-/**
- * Wrap code to ensure it can import from KSAs.
- *
- * Adds the necessary import path setup if not already present.
- */
-export function wrapCodeForExecution(code: string): string {
-  // If code already has imports from KSAs, use it as-is
-  if (code.includes("from './ksa/") || code.includes('from "./ksa/')) {
-    return code;
-  }
-
-  // If code has imports from 'ksa/', adjust the path
-  if (code.includes("from 'ksa/") || code.includes('from "ksa/')) {
-    return code.replace(/from ['"]KSAs\//g, "from './ksa/");
-  }
-
-  return code;
-}
