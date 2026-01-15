@@ -15,7 +15,7 @@
  */
 
 import { internal } from "../_generated/api";
-import { extractCodeBlocks, wrapCodeForExecution } from "../utils/codeExecHelpers";
+import { wrapCodeForExecution } from "../utils/codeExecHelpers";
 import type { ChainOfThoughtStep, StepStatus } from "../../shared/chain-of-thought";
 import { createStepId } from "../../shared/chain-of-thought";
 
@@ -77,14 +77,41 @@ export function getSteps(threadId: string): ChainOfThoughtStep[] {
 }
 
 // ============================================================================
-// Cloud LLM Gateway (NO TOOL SCHEMAS)
+// Cloud LLM Gateway (Single execute_code tool)
 // ============================================================================
 
+interface ToolCall {
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+interface LLMResponse {
+  text: string;
+  toolCalls?: ToolCall[];
+  finishReason?: string;
+}
+
+// Single tool for code execution
+const EXECUTE_CODE_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "execute_code",
+    description: "Execute TypeScript code that imports from KSAs (./ksa/*). Use this to perform actions like saving artifacts, searching the web, generating PDFs, etc.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: {
+          type: "string",
+          description: "TypeScript code to execute. Import from ./ksa/* for capabilities.",
+        },
+      },
+      required: ["code"],
+    },
+  },
+};
+
 /**
- * Call the cloud LLM gateway.
- *
- * IMPORTANT: This does NOT send tool schemas.
- * The LLM generates code, not JSON tool calls.
+ * Call the cloud LLM gateway with single execute_code tool.
  */
 async function callCloudLLM(
   messages: LLMMessage[],
@@ -94,7 +121,7 @@ async function callCloudLLM(
     maxTokens?: number;
     temperature?: number;
   } = {}
-): Promise<string> {
+): Promise<LLMResponse> {
   const { convexUrl, jwt } = gatewayConfig;
 
   if (!convexUrl || !jwt) {
@@ -112,7 +139,7 @@ async function callCloudLLM(
       args: {
         model: options.model || "google/gemini-3-flash-preview",
         messages,
-        // NO 'tools' property - this is intentional!
+        tools: [EXECUTE_CODE_TOOL],
         maxTokens: options.maxTokens || 4096,
         temperature: options.temperature,
       },
@@ -128,7 +155,32 @@ async function callCloudLLM(
     throw new Error(`LLM error: ${result.error || JSON.stringify(result)}`);
   }
 
-  return result.data.choices?.[0]?.message?.content || "";
+  const choice = result.data.choices?.[0];
+
+  // Extract tool calls if present
+  const toolCalls = choice?.message?.tool_calls?.map((tc: any) => {
+    let args = {};
+    const rawArgs = tc.function?.arguments || tc.arguments;
+    if (typeof rawArgs === "string" && rawArgs.length > 0) {
+      try {
+        args = JSON.parse(rawArgs);
+      } catch (e) {
+        args = { code: rawArgs }; // Treat as raw code if JSON parse fails
+      }
+    } else if (typeof rawArgs === "object" && rawArgs !== null) {
+      args = rawArgs;
+    }
+    return {
+      toolName: tc.function?.name || tc.name,
+      args,
+    };
+  });
+
+  return {
+    text: choice?.message?.content || "",
+    toolCalls: toolCalls?.length > 0 ? toolCalls : undefined,
+    finishReason: choice?.finish_reason,
+  };
 }
 
 // ============================================================================
@@ -138,10 +190,11 @@ async function callCloudLLM(
 /**
  * Run the code execution agent loop.
  *
- * This is the core of the new architecture:
- * - LLM generates TypeScript code
- * - We execute it in the sandbox
- * - Output feeds back into the conversation
+ * Architecture:
+ * - LLM has single execute_code tool
+ * - LLM calls the tool with TypeScript code
+ * - We execute the code and return results
+ * - Loop until LLM responds without tool calls
  */
 export async function runCodeExecLoop(
   ctx: any,
@@ -174,43 +227,46 @@ export async function runCodeExecLoop(
     const thinkingId = emitStep(threadId, {
       type: "thinking",
       status: "active",
-      label: `Step ${step + 1}: Generating code...`,
+      label: `Step ${step + 1}: Thinking...`,
     });
 
-    // Call LLM (NO tool schemas!)
+    // Call LLM with execute_code tool
     const response = await callCloudLLM(messages, gatewayConfig);
     updateStepStatus(threadId, thinkingId, "complete");
 
-    // Extract code blocks from response
-    const codeBlocks = extractCodeBlocks(response);
-
-    // If no code blocks, this is the final response
-    if (codeBlocks.length === 0) {
-      finalText = response;
-      emitStep(threadId, {
-        type: "text",
-        status: "complete",
-        label: response.slice(0, 200),
-      });
+    // If no tool calls, this is the final response
+    if (!response.toolCalls || response.toolCalls.length === 0) {
+      finalText = response.text;
+      if (finalText) {
+        emitStep(threadId, {
+          type: "text",
+          status: "complete",
+          label: finalText.slice(0, 200),
+        });
+      }
       break;
     }
 
-    // Execute each code block
-    const outputs: string[] = [];
+    // Execute each tool call (should be execute_code)
+    const toolResults: string[] = [];
 
-    for (let i = 0; i < codeBlocks.length; i++) {
-      const code = wrapCodeForExecution(codeBlocks[i]);
+    for (const tc of response.toolCalls) {
+      if (tc.toolName !== "execute_code") {
+        toolResults.push(`Unknown tool: ${tc.toolName}`);
+        continue;
+      }
+
+      const code = wrapCodeForExecution((tc.args as any).code || "");
 
       const execId = emitStep(threadId, {
         type: "tool",
         status: "active",
-        toolName: "code_execution",
-        label: `Executing code block ${i + 1}...`,
+        toolName: "execute_code",
+        label: "Executing code...",
         input: { code: code.slice(0, 500) },
       });
 
       try {
-        // Execute the code via Convex action
         const result = await ctx.runAction(internal.actions.codeExec.execute, {
           code,
           timeoutMs: 60_000,
@@ -223,15 +279,15 @@ export async function runCodeExecLoop(
         });
 
         if (result.success) {
-          outputs.push(`[Code block ${i + 1} output]\n${result.output}`);
+          toolResults.push(`[execute_code result]\n${result.output}`);
           updateStepStatus(threadId, execId, "complete");
         } else {
-          outputs.push(`[Code block ${i + 1} error]\n${result.error}\n${result.output}`);
+          toolResults.push(`[execute_code error]\n${result.error}\n${result.output}`);
           updateStepStatus(threadId, execId, "error");
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        outputs.push(`[Code block ${i + 1} error]\n${msg}`);
+        toolResults.push(`[execute_code error]\n${msg}`);
         allExecutions.push({
           code,
           output: msg,
@@ -241,16 +297,16 @@ export async function runCodeExecLoop(
       }
     }
 
-    // Add assistant message with the response
+    // Add assistant message
     messages.push({
       role: "assistant",
-      content: response,
+      content: response.text || `Called execute_code`,
     });
 
-    // Add execution results as user message
+    // Add tool results as user message
     messages.push({
       role: "user",
-      content: `Code execution results:\n\n${outputs.join("\n\n")}\n\nContinue with the task. If the task is complete, provide a summary without code blocks.`,
+      content: `${toolResults.join("\n\n")}\n\nContinue with the task. When complete, respond without calling execute_code.`,
     });
   }
 
