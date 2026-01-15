@@ -1,14 +1,28 @@
 /**
- * Beads Skills
+ * Beads KSA - Knowledge, Skills, and Abilities
  *
- * Functions for task tracking using the Beads system.
- * Beads is a distributed issue tracking system that stores issues in git.
+ * Task planning and tracking for agent workflows.
+ * Use beads to break down work into trackable tasks, track progress,
+ * and coordinate retries.
+ *
+ * OPTIMIZATION: update() and close() use fire-and-forget by default
+ * to reduce latency. Set { blocking: true } for synchronous behavior.
+ *
+ * @example
+ * import { create, update, close, list, get } from './ksa/beads';
+ *
+ * // Create tasks for work plan
+ * const researchTask = await create({ title: 'Research topic', type: 'task', priority: 1 });
+ * const writeTask = await create({ title: 'Write report', type: 'task', priority: 2 });
+ *
+ * // Update as you progress (non-blocking by default)
+ * update(researchTask.id, { status: 'in_progress' });
+ *
+ * // Close when done (non-blocking by default)
+ * close(researchTask.id, 'Found 5 relevant sources');
  */
 
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
+import { callGateway, fireAndForget } from "./_shared/gateway";
 
 // ============================================================================
 // Types
@@ -25,7 +39,7 @@ export interface Issue {
   status: IssueStatus;
   priority: Priority;
   description?: string;
-  createdAt: string;
+  createdAt: number;
 }
 
 export interface CreateOptions {
@@ -40,162 +54,317 @@ export interface UpdateOptions {
   priority?: Priority;
   title?: string;
   description?: string;
+  /** If true, wait for server response (default: false for speed) */
+  blocking?: boolean;
 }
+
+export interface CloseOptions {
+  /** If true, wait for server response (default: false for speed) */
+  blocking?: boolean;
+}
+
+export interface CreateResult {
+  success: boolean;
+  id: string;
+  error?: string;
+}
+
+// ============================================================================
+// Gateway wrapper with fallback
+// ============================================================================
+
+async function callCloud(
+  servicePath: string,
+  args: Record<string, unknown>,
+  type: "query" | "action" | "mutation" = "mutation"
+): Promise<any> {
+  const convexUrl = process.env.CONVEX_URL;
+  if (!convexUrl) {
+    console.log("[beads] CONVEX_URL not configured, using in-memory fallback");
+    return { error: "Gateway not configured" };
+  }
+
+  try {
+    return await callGateway(servicePath, args, type);
+  } catch (error) {
+    console.error(`[beads] Cloud exception: ${error}`);
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function fireCloud(
+  servicePath: string,
+  args: Record<string, unknown>,
+  type: "query" | "action" | "mutation" = "mutation"
+): void {
+  const convexUrl = process.env.CONVEX_URL;
+  if (!convexUrl) {
+    console.log("[beads] CONVEX_URL not configured, skipping fire-and-forget");
+    return;
+  }
+  fireAndForget(servicePath, args, type);
+}
+
+// In-memory fallback for when gateway isn't available
+const inMemoryTasks: Map<string, Issue> = new Map();
+let nextId = 1;
 
 // ============================================================================
 // Functions
 // ============================================================================
 
 /**
- * Create a new issue/task.
+ * Create a new task for tracking work.
  *
- * @param options - Issue creation options
- * @returns The created issue ID
+ * @param options - Task creation options
+ * @returns Created task with ID
  *
  * @example
- * const id = await create({
- *   title: 'Fix login bug',
- *   type: 'bug',
+ * const task = await create({
+ *   title: 'Research market trends',
+ *   type: 'task',
  *   priority: 1,
  * });
+ * console.log(`Created task: ${task.id}`);
  */
-export async function create(options: CreateOptions): Promise<string> {
-  const args: string[] = [
-    `--title="${options.title}"`,
-    `--type=${options.type || "task"}`,
-    `--priority=${options.priority ?? 2}`,
-  ];
+export async function create(options: CreateOptions): Promise<CreateResult> {
+  console.log(`[beads] Creating task: "${options.title}"`);
 
-  if (options.description) {
-    args.push(`--description="${options.description}"`);
-  }
-
-  const { stdout } = await execAsync(`bd create ${args.join(" ")}`, {
-    cwd: "/home/user/workspace",
-    timeout: 10_000,
+  // Try cloud first
+  const result = await callCloud("planning.beads.create", {
+    title: options.title,
+    type: options.type || "task",
+    priority: options.priority ?? 2,
+    description: options.description,
   });
 
-  // Extract issue ID from output (e.g., "Created issue: project-abc123")
-  const match = stdout.match(/Created issue:\s*(\S+)/);
-  if (!match) {
-    throw new Error(`Failed to parse issue ID from: ${stdout}`);
+  if (!result.error && result) {
+    console.log(`[beads] Created task in cloud: ${result}`);
+    return { success: true, id: String(result) };
   }
 
-  return match[1];
+  // Fallback to in-memory
+  const id = `task-${nextId++}`;
+  const task: Issue = {
+    id,
+    title: options.title,
+    type: options.type || "task",
+    status: "open",
+    priority: (options.priority ?? 2) as Priority,
+    description: options.description,
+    createdAt: Date.now(),
+  };
+  inMemoryTasks.set(id, task);
+  console.log(`[beads] Created task in-memory: ${id}`);
+  return { success: true, id };
 }
 
 /**
- * Update an existing issue.
+ * Update an existing task.
+ * Uses fire-and-forget by default for speed. Set blocking: true to wait.
  *
- * @param id - Issue ID
+ * @param id - Task ID
  * @param options - Fields to update
  *
  * @example
- * await update('project-abc123', { status: 'in_progress' });
+ * // Non-blocking (default) - faster
+ * update('task-1', { status: 'in_progress' });
+ *
+ * // Blocking - wait for confirmation
+ * await update('task-1', { status: 'in_progress', blocking: true });
  */
 export async function update(id: string, options: UpdateOptions): Promise<void> {
-  const args: string[] = [id];
+  const { blocking, ...updateFields } = options;
+  console.log(`[beads] Updating task ${id}: ${JSON.stringify(updateFields)}${blocking ? " (blocking)" : ""}`);
 
-  if (options.status) args.push(`--status=${options.status}`);
-  if (options.priority !== undefined) args.push(`--priority=${options.priority}`);
-  if (options.title) args.push(`--title="${options.title}"`);
-  if (options.description) args.push(`--description="${options.description}"`);
+  // Update in-memory immediately (for local consistency)
+  const task = inMemoryTasks.get(id);
+  if (task) {
+    if (updateFields.status) task.status = updateFields.status;
+    if (updateFields.priority !== undefined) task.priority = updateFields.priority;
+    if (updateFields.title) task.title = updateFields.title;
+    if (updateFields.description) task.description = updateFields.description;
+  }
 
-  await execAsync(`bd update ${args.join(" ")}`, {
-    cwd: "/home/user/workspace",
-    timeout: 10_000,
-  });
+  // Fire-and-forget by default for speed
+  if (!blocking) {
+    fireCloud("planning.beads.update", { id, ...updateFields });
+    console.log(`[beads] Updated task (fire-and-forget): ${id}`);
+    return;
+  }
+
+  // Blocking mode - wait for server
+  const result = await callCloud("planning.beads.update", { id, ...updateFields });
+  if (!result.error) {
+    console.log(`[beads] Updated task in cloud: ${id}`);
+  }
 }
 
 /**
- * Close an issue.
+ * Close a task as completed.
+ * Uses fire-and-forget by default for speed.
  *
- * @param id - Issue ID
- * @param reason - Optional reason for closing
+ * @param id - Task ID
+ * @param reason - Optional completion reason
+ * @param options - Optional settings (blocking: true to wait)
  *
  * @example
- * await close('project-abc123', 'Completed implementation');
+ * // Non-blocking (default) - faster
+ * close('task-1', 'Successfully generated report');
+ *
+ * // Blocking - wait for confirmation
+ * await close('task-1', 'Done', { blocking: true });
  */
-export async function close(id: string, reason?: string): Promise<void> {
-  const reasonArg = reason ? ` --reason="${reason}"` : "";
-  await execAsync(`bd close ${id}${reasonArg}`, {
-    cwd: "/home/user/workspace",
-    timeout: 10_000,
-  });
+export async function close(id: string, reason?: string, options?: CloseOptions): Promise<void> {
+  console.log(`[beads] Closing task ${id}${reason ? `: ${reason}` : ""}${options?.blocking ? " (blocking)" : ""}`);
+
+  // Update in-memory immediately (for local consistency)
+  const task = inMemoryTasks.get(id);
+  if (task) {
+    task.status = "closed";
+  }
+
+  // Fire-and-forget by default for speed
+  if (!options?.blocking) {
+    fireCloud("planning.beads.close", { id, reason });
+    console.log(`[beads] Closed task (fire-and-forget): ${id}`);
+    return;
+  }
+
+  // Blocking mode - wait for server
+  const result = await callCloud("planning.beads.close", { id, reason });
+  if (!result.error) {
+    console.log(`[beads] Closed task in cloud: ${id}`);
+  }
 }
 
 /**
- * List issues.
+ * List tasks with optional filters.
  *
  * @param options - Filter options
- * @returns Array of issues
+ * @returns Array of tasks
  *
  * @example
- * const openTasks = await list({ status: 'open', type: 'task' });
+ * const openTasks = await list({ status: 'open' });
+ * console.log(`${openTasks.length} tasks remaining`);
  */
 export async function list(options?: {
   status?: IssueStatus;
   type?: IssueType;
 }): Promise<Issue[]> {
-  const args: string[] = ["--json"];
+  console.log(`[beads] Listing tasks: ${JSON.stringify(options || {})}`);
 
-  if (options?.status) args.push(`--status=${options.status}`);
-  if (options?.type) args.push(`--type=${options.type}`);
+  // Try cloud first
+  const result = await callCloud(
+    "planning.beads.list",
+    {
+      status: options?.status,
+      type: options?.type,
+    },
+    "query"
+  );
 
-  try {
-    const { stdout } = await execAsync(`bd list ${args.join(" ")}`, {
-      cwd: "/home/user/workspace",
-      timeout: 10_000,
-    });
-
-    return JSON.parse(stdout);
-  } catch {
-    // If bd list fails or returns empty, return empty array
-    return [];
+  if (!result.error && Array.isArray(result)) {
+    console.log(`[beads] Listed ${result.length} tasks from cloud`);
+    return result.map((t: any) => ({
+      id: t._id || t.id,
+      title: t.title,
+      type: t.type,
+      status: t.status,
+      priority: t.priority,
+      description: t.description,
+      createdAt: t.createdAt,
+    }));
   }
+
+  // Fallback to in-memory
+  let tasks = Array.from(inMemoryTasks.values());
+  if (options?.status) {
+    tasks = tasks.filter((t) => t.status === options.status);
+  }
+  if (options?.type) {
+    tasks = tasks.filter((t) => t.type === options.type);
+  }
+  console.log(`[beads] Listed ${tasks.length} tasks from memory`);
+  return tasks;
 }
 
 /**
- * Get issues that are ready to work on (no blockers).
+ * Get tasks ready to work on (open and unblocked).
  *
- * @returns Array of ready issues, sorted by priority
+ * @returns Array of ready tasks, sorted by priority
  *
  * @example
  * const ready = await getReady();
- * console.log('Next task:', ready[0]?.title);
+ * if (ready.length > 0) {
+ *   console.log(`Next task: ${ready[0].title}`);
+ * }
  */
 export async function getReady(): Promise<Issue[]> {
-  try {
-    const { stdout } = await execAsync("bd ready --json", {
-      cwd: "/home/user/workspace",
-      timeout: 10_000,
-    });
+  console.log(`[beads] Getting ready tasks`);
 
-    return JSON.parse(stdout);
-  } catch {
-    return [];
+  // Try cloud first
+  const result = await callCloud("planning.beads.getReady", {}, "query");
+
+  if (!result.error && Array.isArray(result)) {
+    console.log(`[beads] Found ${result.length} ready tasks from cloud`);
+    return result.map((t: any) => ({
+      id: t._id || t.id,
+      title: t.title,
+      type: t.type,
+      status: t.status,
+      priority: t.priority,
+      description: t.description,
+      createdAt: t.createdAt,
+    }));
   }
+
+  // Fallback to in-memory
+  const tasks = Array.from(inMemoryTasks.values())
+    .filter((t) => t.status === "open")
+    .sort((a, b) => a.priority - b.priority);
+  console.log(`[beads] Found ${tasks.length} ready tasks from memory`);
+  return tasks;
 }
 
 /**
- * Get a single issue by ID.
+ * Get a single task by ID.
  *
- * @param id - Issue ID
- * @returns The issue, or null if not found
+ * @param id - Task ID
+ * @returns The task, or null if not found
  *
  * @example
- * const issue = await get('project-abc123');
- * if (issue) console.log(issue.title);
+ * const task = await get('task-1');
+ * if (task) {
+ *   console.log(`Task status: ${task.status}`);
+ * }
  */
 export async function get(id: string): Promise<Issue | null> {
-  try {
-    const { stdout } = await execAsync(`bd show ${id} --json`, {
-      cwd: "/home/user/workspace",
-      timeout: 10_000,
-    });
+  console.log(`[beads] Getting task: ${id}`);
 
-    return JSON.parse(stdout);
-  } catch {
-    return null;
+  // Try cloud first
+  const result = await callCloud("planning.beads.get", { id }, "query");
+
+  if (!result.error && result) {
+    console.log(`[beads] Got task from cloud: ${id}`);
+    return {
+      id: result._id || result.id,
+      title: result.title,
+      type: result.type,
+      status: result.status,
+      priority: result.priority,
+      description: result.description,
+      createdAt: result.createdAt,
+    };
   }
+
+  // Fallback to in-memory
+  const task = inMemoryTasks.get(id);
+  if (task) {
+    console.log(`[beads] Got task from memory: ${id}`);
+    return task;
+  }
+
+  console.log(`[beads] Task not found: ${id}`);
+  return null;
 }

@@ -1,11 +1,13 @@
 /**
- * Deliverables KSA - Knowledge, Skills, and Abilities
+ * Artifacts KSA - Knowledge, Skills, and Abilities
  *
- * Save and retrieve artifacts (deliverables) that persist across sandbox sessions.
+ * Save and retrieve artifacts that persist across sandbox sessions.
  * Use this to create outputs that will be available after the agent finishes.
  *
+ * CATEGORY: core
+ *
  * @example
- * import { saveArtifact, readArtifact, listArtifacts } from './ksa/deliverables';
+ * import { saveArtifact, readArtifact, listArtifacts } from './ksa/artifacts';
  *
  * // Save a markdown report
  * await saveArtifact({
@@ -97,7 +99,7 @@ async function callCloud(
   const jwt = gatewayConfig?.jwt || process.env.SANDBOX_JWT;
 
   if (!convexUrl || !jwt) {
-    console.log("[deliverables] Gateway not configured");
+    console.log("[artifacts] Gateway not configured");
     return { error: "Gateway not configured" };
   }
 
@@ -113,19 +115,19 @@ async function callCloud(
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[deliverables] Cloud call failed: ${error}`);
+      console.error(`[artifacts] Cloud call failed: ${error}`);
       return { error };
     }
 
     const result = await response.json();
     if (!result.ok) {
-      console.error(`[deliverables] Cloud error: ${result.error}`);
+      console.error(`[artifacts] Cloud error: ${result.error}`);
       return { error: result.error };
     }
 
     return result.data;
   } catch (error) {
-    console.error(`[deliverables] Cloud exception: ${error}`);
+    console.error(`[artifacts] Cloud exception: ${error}`);
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -135,10 +137,11 @@ async function callCloud(
 // ============================================================================
 
 /**
- * Save an artifact (deliverable) to the cloud.
+ * Save an artifact to the cloud.
  *
  * Use this for markdown, JSON, CSV, or text files.
  * For PDFs, use the `pdf.generate()` function instead.
+ * For emails, use the `email.send()` function instead.
  *
  * @param params - Name, type, content, and optional metadata
  * @returns Result with success status and artifact ID
@@ -198,7 +201,7 @@ export async function saveArtifact(
     return { success: false, error: result.error };
   }
 
-  console.log(`[deliverables] Saved artifact: ${params.name}`);
+  console.log(`[artifacts] Saved artifact: ${params.name}`);
   return {
     success: true,
     id: result,
@@ -239,7 +242,7 @@ export async function readArtifact(artifactId: string): Promise<ReadResult> {
     return { success: false, error: `Artifact not found: ${artifactId}` };
   }
 
-  console.log(`[deliverables] Read artifact: ${result.name}`);
+  console.log(`[artifacts] Read artifact: ${result.name}`);
   return {
     success: true,
     name: result.name,
@@ -280,7 +283,7 @@ export async function listArtifacts(): Promise<ListResult> {
   }
 
   const artifacts = Array.isArray(result) ? result : [];
-  console.log(`[deliverables] Listed ${artifacts.length} artifacts`);
+  console.log(`[artifacts] Listed ${artifacts.length} artifacts`);
 
   return {
     success: true,

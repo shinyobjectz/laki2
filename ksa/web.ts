@@ -92,7 +92,7 @@ export async function scrape(url: string): Promise<ScrapedContent> {
 }
 
 /**
- * Search for recent news articles.
+ * Search for recent news articles using Valyu (recommended for research).
  *
  * @param query - News search query
  * @param limit - Maximum articles to return (default: 10)
@@ -105,9 +105,40 @@ export async function scrape(url: string): Promise<ScrapedContent> {
  * }
  */
 export async function news(query: string, limit = 10): Promise<NewsArticle[]> {
+  // Use Valyu's news search for better quality research results
+  const response = await callGateway('services.Valyu.internal.search', {
+    query,
+    maxResults: limit,
+    searchType: 'news',
+    fastMode: true,
+  });
+  return (response.results || []).map((r: any) => ({
+    title: r.title,
+    url: r.url,
+    source: r.source || new URL(r.url).hostname,
+    publishedAt: r.publishedAt || r.date || '',
+    summary: r.snippet || r.description || '',
+  }));
+}
+
+/**
+ * Monitor brand mentions in news (uses APITube for brand-specific tracking).
+ * Use this for tracking specific brand/company mentions, not general research.
+ *
+ * @param brandQuery - Brand or company name to monitor
+ * @param limit - Maximum articles to return (default: 10)
+ * @returns Array of news articles mentioning the brand
+ *
+ * @example
+ * const mentions = await brandNews('Anthropic');
+ * for (const m of mentions) {
+ *   console.log(`[${m.source}] ${m.title}`);
+ * }
+ */
+export async function brandNews(brandQuery: string, limit = 10): Promise<NewsArticle[]> {
   const response = await callGateway('services.APITube.internal.call', {
     endpoint: '/v1/news/everything',
-    params: { q: query, size: limit },
+    params: { q: brandQuery, size: limit },
   });
   return (response.articles || response.data || []).map((a: any) => ({
     title: a.title,
@@ -116,5 +147,44 @@ export async function news(query: string, limit = 10): Promise<NewsArticle[]> {
     publishedAt: a.publishedAt,
     summary: a.description || a.summary,
   }));
+}
+
+/**
+ * Comprehensive web research combining search and news.
+ * Use this for thorough research on a topic.
+ *
+ * @param query - Research topic
+ * @param options - Research options
+ * @returns Combined search and news results
+ *
+ * @example
+ * const research = await webResearch('multi-agent AI systems', { depth: 'thorough' });
+ * console.log('Articles:', research.articles.length);
+ * console.log('Sources:', research.sources.length);
+ */
+export async function webResearch(
+  query: string,
+  options?: {
+    depth?: 'quick' | 'thorough';
+    includeNews?: boolean;
+  }
+): Promise<{
+  sources: SearchResult[];
+  articles: NewsArticle[];
+}> {
+  const maxResults = options?.depth === 'thorough' ? 15 : 8;
+  const includeNews = options?.includeNews !== false;
+
+  // Always do web search
+  const searchPromise = search(query, { maxResults, type: 'web' });
+
+  // Optionally include news
+  const newsPromise = includeNews
+    ? news(query, maxResults)
+    : Promise.resolve([]);
+
+  const [sources, articles] = await Promise.all([searchPromise, newsPromise]);
+
+  return { sources, articles };
 }
 

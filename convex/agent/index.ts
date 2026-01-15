@@ -717,8 +717,14 @@ export const startCodeExecThread = action({
   handler: async (ctx, args) => {
     const threadId = `codeexec_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-    // Extract gateway config from context
-    const ctxObj = args.context as { gatewayConfig?: { convexUrl: string; jwt: string }; cardId?: string } | undefined;
+    // Extract gateway config, model, sessionId, and allowedKSAs from context
+    const ctxObj = args.context as {
+      gatewayConfig?: { convexUrl: string; jwt: string };
+      cardId?: string;
+      model?: string;
+      sessionId?: string; // For real-time log forwarding
+      allowedKSAs?: string[]; // KSAs allowed for this task
+    } | undefined;
 
     if (!ctxObj?.gatewayConfig) {
       throw new Error("gatewayConfig required for code execution mode");
@@ -734,11 +740,16 @@ export const startCodeExecThread = action({
       expectedOutcome: "Agent will generate code that imports from skills/",
     });
 
-    // Run the code execution loop
-    const systemPrompt = getCodeExecSystemPrompt();
+    // Run the code execution loop with dynamic KSA documentation
+    const systemPrompt = getCodeExecSystemPrompt({
+      allowedKSAs: ctxObj.allowedKSAs,
+    });
     const result = await runCodeExecLoop(ctx, systemPrompt, args.prompt, ctxObj.gatewayConfig, {
       threadId,
       maxSteps: 10,
+      cardId: ctxObj.cardId,
+      model: ctxObj.model,
+      sessionId: ctxObj.sessionId, // Pass for real-time cloud log forwarding
     });
 
     return {

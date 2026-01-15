@@ -48,8 +48,9 @@ export const execute = internalAction({
     const timeout = Math.min(args.timeoutMs || 60_000, MAX_TIMEOUT_MS);
 
     // Generate unique filename for this execution
+    // IMPORTANT: Write to /home/user/ so relative imports like './ksa/beads' resolve correctly
     const hash = crypto.createHash("md5").update(args.code).digest("hex").slice(0, 8);
-    const filename = `/tmp/agent_exec_${Date.now()}_${hash}.ts`;
+    const filename = `/home/user/agent_exec_${Date.now()}_${hash}.ts`;
 
     try {
       // Write code to temp file

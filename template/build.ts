@@ -16,7 +16,7 @@
  *   bun lakitu custom       # Build custom template only
  */
 
-import { Template, defaultBuildLogger } from "e2b";
+import { Template, defaultBuildLogger, waitForPort } from "e2b";
 import { $ } from "bun";
 
 const LAKITU_DIR = `${import.meta.dir}/..`;
@@ -194,7 +194,7 @@ const baseTemplate = Template()
     CONVEX_URL: "http://localhost:3210",
   });
 
-// Custom template: Add Lakitu code + PRE-BUILT Convex state
+// Custom template: Add Lakitu code + PRE-BUILT Convex state + AUTO-START backend
 const customTemplate = (baseId: string, buildDir: string) => Template()
   .fromTemplate(baseId)
   // Copy Lakitu source code
@@ -229,7 +229,10 @@ const customTemplate = (baseId: string, buildDir: string) => Template()
     PATH: "/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin",
     CONVEX_URL: "http://localhost:3210",
     CONVEX_LOCAL_STORAGE: "/home/user/.convex/convex-backend-state/lakitu",
-  });
+  })
+  // AUTO-START: convex-backend starts on sandbox boot, E2B waits for port 3210
+  // This eliminates ~1000ms of polling overhead - backend is ready when create() returns
+  .setStartCmd("/home/user/start.sh", waitForPort(3210));
 
 async function buildBase() {
   const apiKey = await getApiKey();

@@ -136,7 +136,7 @@ export async function getContext(): Promise<CardContext> {
     "query"
   );
 
-  if (result.error) {
+  if (result?.error) {
     return {
       success: false,
       error: result.error,
@@ -218,7 +218,7 @@ export async function setVariable(
     "mutation"
   );
 
-  if (result.error) {
+  if (result?.error) {
     return { success: false, error: result.error };
   }
 

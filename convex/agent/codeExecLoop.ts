@@ -43,10 +43,53 @@ interface CodeExecResult {
 }
 
 // ============================================================================
-// Chain of Thought Tracking
+// Chain of Thought Tracking + Real-time Cloud Forwarding
 // ============================================================================
 
 const chainOfThoughtSteps: Map<string, ChainOfThoughtStep[]> = new Map();
+
+// Cloud forwarding config (set during loop execution)
+let cloudForwardingConfig: {
+  gatewayConfig: GatewayConfig;
+  sessionId: string;
+} | null = null;
+
+interface StructuredLog {
+  type: string; // thinking, tool, search, file, text
+  label: string;
+  status?: string; // active, complete, error
+  icon?: string;
+  details?: string;
+}
+
+/**
+ * Forward a structured log to the cloud for real-time UI display.
+ * Fire-and-forget - doesn't block execution.
+ */
+async function forwardLogToCloud(log: StructuredLog): Promise<void> {
+  if (!cloudForwardingConfig) return;
+
+  const { gatewayConfig, sessionId } = cloudForwardingConfig;
+  try {
+    await fetch(`${gatewayConfig.convexUrl}/agent/call`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${gatewayConfig.jwt}`,
+      },
+      body: JSON.stringify({
+        path: "agent.workflows.sandboxConvex.appendLogs",
+        type: "mutation",
+        args: {
+          sessionId,
+          logs: [log],
+        },
+      }),
+    }).catch(() => {}); // Ignore errors - fire and forget
+  } catch {
+    // Ignore - don't block execution
+  }
+}
 
 function emitStep(
   threadId: string,
@@ -61,6 +104,20 @@ function emitStep(
     ...step,
   } as ChainOfThoughtStep;
   chainOfThoughtSteps.get(threadId)!.push(fullStep);
+
+  // Forward structured log to cloud for real-time UI (fire-and-forget)
+  const label = (fullStep as any).label || (fullStep as any).toolName || fullStep.type;
+  forwardLogToCloud({
+    type: fullStep.type,
+    label,
+    status: fullStep.status,
+    icon: fullStep.type === "thinking" ? "lightbulb" :
+          fullStep.type === "tool" ? "tools" :
+          fullStep.type === "search" ? "magnify" :
+          fullStep.type === "file" ? "file" : "text",
+    details: (fullStep as any).description,
+  });
+
   return fullStep.id;
 }
 
@@ -225,15 +282,25 @@ export async function runCodeExecLoop(
     threadId?: string;
     cardId?: string;
     model?: string;
+    sessionId?: string; // For real-time log forwarding to cloud
   } = {}
 ): Promise<CodeExecResult> {
-  // MARKER: Version 2026-01-15-v3 - code execution enforcement with retry limit
-  console.log("🔥🔥🔥 [codeExecLoop] VERSION: 2026-01-15-v3 WITH CODE ENFORCEMENT 🔥🔥🔥");
+  // MARKER: Version 2026-01-15-v4 - real-time log forwarding to cloud
+  console.log("🔥🔥🔥 [codeExecLoop] VERSION: 2026-01-15-v4 WITH REAL-TIME LOGS 🔥🔥🔥");
 
   const maxSteps = options.maxSteps || 10;
   const threadId = options.threadId || `codeexec_${Date.now()}`;
   const cardId = options.cardId;
   const model = options.model;
+
+  // Set up cloud forwarding for real-time chain of thought
+  if (options.sessionId) {
+    cloudForwardingConfig = {
+      gatewayConfig,
+      sessionId: options.sessionId,
+    };
+    console.log(`[codeExecLoop] Cloud forwarding enabled for session: ${options.sessionId}`);
+  }
   let codeEnforcementRetries = 0;
   const MAX_CODE_ENFORCEMENT_RETRIES = 3;
 
@@ -405,6 +472,40 @@ export async function runCodeExecLoop(
         role: "assistant",
         content: `Thinking: ${action.thinking || "..."}\n\nExecuting code:\n\`\`\`typescript\n${action.code}\n\`\`\``,
       });
+
+      // Emit console output as chain-of-thought steps for real-time UI visibility
+      // Parse output for meaningful logs (beads, deliverables, web, etc.)
+      const outputLines = (allExecutions[allExecutions.length - 1]?.output || "").split("\n");
+      for (const line of outputLines) {
+        if (!line.trim()) continue;
+
+        // Categorize log lines for better UI display
+        let stepType: "tool" | "text" | "search" | "file" = "text";
+        let label = line.slice(0, 150);
+
+        if (line.includes("[beads]")) {
+          stepType = "tool";
+          label = line.replace("[beads]", "📋").trim();
+        } else if (line.includes("[deliverables]") || line.includes("[pdf]")) {
+          stepType = "file";
+          label = line.replace("[deliverables]", "💾").replace("[pdf]", "📄").trim();
+        } else if (line.includes("[web]") || line.includes("Searching") || line.includes("search")) {
+          stepType = "search";
+          label = line.replace("[web]", "🔍").trim();
+        } else if (line.includes("Found") || line.includes("Created") || line.includes("Saved")) {
+          // Keep as text but show it
+        } else if (line.startsWith("[") || line.includes("DEBUG")) {
+          // Skip debug/internal logs
+          continue;
+        }
+
+        emitStep(threadId, {
+          type: stepType,
+          status: "complete",
+          label,
+          ...(stepType === "tool" && { toolName: "console", output: line }),
+        });
+      }
 
       // Add execution result
       messages.push({
