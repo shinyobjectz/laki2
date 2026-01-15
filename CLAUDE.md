@@ -3,14 +3,35 @@
 > **AUDIENCE**: This document is for YOU, the AI agent (Claude Code, Cursor, etc.) working on this codebase.
 > Read this BEFORE writing any code.
 
+## Taxonomy Warning
+
+> **CRITICAL**: The terms "tools" and "skills" are OVERLOADED in AI codebases.
+> This project uses **KSA** (Knowledge, Skills, and Abilities) to avoid confusion.
+
+| Term | In This Codebase | NOT This |
+|------|------------------|----------|
+| **KSA** | Plain TypeScript modules in `ksa/` | AI SDK tools, MCP tools, Claude skills |
+| **tools** | LEGACY code being removed | Do not use this term |
+| **skills** | Do not use | Overloaded term |
+
 ## The Architecture (DO NOT DEVIATE)
 
 Lakitu uses **code execution**, NOT JSON tool calls.
 
 ```
-CORRECT: Agent writes TypeScript → E2B executes it → Results
-WRONG:   Agent makes JSON tool call → Executor parses it → Results
+CORRECT: Agent writes TypeScript → imports from ksa/ → E2B executes it
+WRONG:   Agent makes JSON tool call → Executor parses JSON → Runs function
 ```
+
+### What is a KSA?
+
+A **KSA (Knowledge, Skills, and Abilities)** is a comprehensive capability module:
+
+- **Knowledge**: JSDoc documentation explaining what it does
+- **Skills**: Executable TypeScript functions
+- **Abilities**: What the agent can accomplish with it
+
+KSAs are designed for **code execution** - the agent imports and calls them directly.
 
 ### What This Means For You
 
@@ -18,17 +39,17 @@ When working on this codebase:
 
 | If you see... | It is... | Do NOT... |
 |---------------|----------|-----------|
-| `convex/tools/*.ts` | LEGACY - being migrated | Add more tool() definitions |
-| `import { tool } from 'ai'` | LEGACY - being migrated | Use this pattern |
-| `skills/*.ts` | CORRECT - plain functions | Convert to tool() format |
-| System prompt with code examples | CORRECT | Add JSON tool schemas |
+| `ksa/*.ts` | ✅ CORRECT - KSA modules | Convert to tool() format |
+| `convex/tools/*.ts` | ⚠️ LEGACY - being removed | Add more tool() definitions |
+| `import { tool } from 'ai'` | ⚠️ LEGACY | Use this pattern |
+| System prompt with code examples | ✅ CORRECT | Add JSON tool schemas |
 
 ## STOP: Read Before Touching Agent Code
 
 ### The Wrong Pattern (DO NOT ADD)
 
 ```typescript
-// ❌ WRONG - JSON tool calling pattern
+// ❌ WRONG - JSON tool calling pattern (AI SDK, MCP, etc.)
 import { tool } from 'ai';
 
 export const searchTool = tool({
@@ -37,13 +58,13 @@ export const searchTool = tool({
   execute: async (args) => { ... }
 });
 
-// Then sending to LLM:
+// Sending tool schemas to LLM:
 const response = await llm.chat({
-  tools: [searchTool],  // ❌ Sending tool schemas
+  tools: [searchTool],  // ❌ NO - don't send tool schemas
 });
 
-// Then parsing tool calls:
-if (response.tool_calls) {  // ❌ JSON tool call parsing
+// Parsing tool calls:
+if (response.tool_calls) {  // ❌ NO - don't parse JSON tool calls
   for (const tc of response.tool_calls) {
     await executeTool(tc.name, tc.args);
   }
@@ -53,9 +74,9 @@ if (response.tool_calls) {  // ❌ JSON tool call parsing
 ### The Right Pattern (ADD THIS)
 
 ```typescript
-// ✅ CORRECT - Code execution pattern
+// ✅ CORRECT - Code execution with KSAs
 
-// Skills are plain TypeScript functions in skills/*.ts
+// KSAs are plain TypeScript functions in ksa/*.ts
 export async function search(query: string): Promise<SearchResult[]> {
   // Implementation
 }
@@ -76,17 +97,19 @@ for (const code of codeBlocks) {
 
 ```
 packages/lakitu/
-├── skills/                 # ✅ CORRECT: Plain TypeScript functions
-│   ├── web.ts              #    Agent imports these
+├── ksa/                    # ✅ KSA MODULES (Knowledge, Skills, Abilities)
+│   ├── web.ts              #    Agent imports: from './ksa/web'
 │   ├── file.ts
 │   ├── pdf.ts
-│   └── beads.ts
+│   ├── beads.ts
+│   └── browser.ts
 │
-├── convex/tools/           # ⚠️  LEGACY: Being migrated to skills/
-│   └── *.ts                #    DO NOT add new tool() definitions
+├── convex/tools/           # ⚠️  LEGACY: Being removed - DO NOT USE
+│   └── *.ts                #    These are old tool() definitions
 │
 ├── convex/agent/           # Agent loop implementation
-│   └── index.ts            #    Should NOT send tool schemas to LLM
+│   ├── index.ts            #    Legacy loop (tool calling)
+│   └── codeExecLoop.ts     #    ✅ New loop (code execution)
 │
 └── runtime/                # CLI commands for bash
     └── generate-pdf        #    Called via: bash: generate-pdf "name"
@@ -94,30 +117,38 @@ packages/lakitu/
 
 ## When Adding New Capabilities
 
-### Option A: Add a Skill (Preferred)
+### Option A: Add a KSA (Preferred)
 
-1. Create `skills/myskill.ts`:
+1. Create `ksa/mycapability.ts`:
 ```typescript
 /**
- * Description of what this skill does.
+ * MyCapability KSA - Knowledge, Skills, and Abilities
+ *
+ * Description of what this KSA enables.
  */
 
+// Knowledge: Type definitions
 export interface MyResult {
-  // Types
+  // Types help the agent understand data structures
 }
 
+// Skills: Executable functions
 /**
  * Function description with @example
+ *
+ * @example
+ * const result = await myFunction('input');
  */
 export async function myFunction(arg: string): Promise<MyResult> {
-  // Implementation
+  // Abilities: The implementation
 }
 ```
 
 2. The agent uses it by writing code:
 ```typescript
-import { myFunction } from './skills/myskill';
+import { myFunction } from './ksa/mycapability';
 const result = await myFunction('input');
+console.log(result);
 ```
 
 ### Option B: Add a CLI Command (For File Output)
@@ -144,26 +175,27 @@ export function createAllTools(ctx) {
 await llm.chat({ tools: [...] });
 ```
 
-## Why This Architecture
+## Why KSAs + Code Execution
 
-1. **Token Efficiency** - No tool schemas every request
-2. **Model Agnostic** - Any LLM that generates code works
-3. **Composable** - Agent chains operations naturally
-4. **Debuggable** - You can read exactly what code ran
-5. **Extensible** - Add skills by adding TypeScript files
+1. **No Confusion** - "KSA" won't be mistaken for AI SDK tools, MCP, or Claude skills
+2. **Token Efficiency** - No tool schemas sent every request
+3. **Model Agnostic** - Any LLM that generates code works
+4. **Composable** - Agent chains operations naturally in code
+5. **Debuggable** - You can read exactly what code ran
+6. **Extensible** - Add KSAs by adding TypeScript files
 
 ## Migration Status
 
 The codebase is transitioning from JSON tool calls to code execution:
 
-- [x] Created `skills/` directory structure
-- [x] Created `skills/web.ts`, `skills/file.ts`, `skills/pdf.ts`, `skills/beads.ts`, `skills/browser.ts`
+- [x] Created `ksa/` directory with KSA modules
+- [x] Created `ksa/web.ts`, `ksa/file.ts`, `ksa/pdf.ts`, `ksa/beads.ts`, `ksa/browser.ts`
 - [x] Created `convex/actions/codeExec.ts` - Code execution runtime
 - [x] Created `convex/agent/codeExecLoop.ts` - New agent loop (no tool schemas)
 - [x] Created `convex/prompts/codeExec.ts` - System prompt for code execution
 - [x] Added `startCodeExecThread` action to agent index
 - [ ] Switch cloud orchestrator to use `startCodeExecThread` instead of `startThread`
-- [ ] Update E2B template to copy `skills/` to `/home/user/skills/`
+- [ ] Update E2B template to copy `ksa/` to `/home/user/ksa/`
 - [ ] Test code execution end-to-end
 - [ ] Remove legacy `convex/tools/*.ts` and `createAllTools()` pattern
 
@@ -171,8 +203,7 @@ The codebase is transitioning from JSON tool calls to code execution:
 
 | Task | Do This | NOT This |
 |------|---------|----------|
-| Add web capability | `skills/web.ts` with export function | `convex/tools/web.ts` with tool() |
-| Add file capability | `skills/file.ts` with export function | `convex/tools/file.ts` with tool() |
+| Add capability | `ksa/mycap.ts` with export function | `convex/tools/` with tool() |
 | Add CLI command | `runtime/cmd` + bash | New tool() definition |
 | Call LLM | `await llm.chat({ messages })` | `await llm.chat({ messages, tools })` |
 | Parse response | Extract code blocks, execute | Parse tool_calls JSON |
@@ -180,5 +211,5 @@ The codebase is transitioning from JSON tool calls to code execution:
 ## See Also
 
 - `ARCHITECTURE.md` - Detailed architecture explanation
-- `skills/README.md` - How to use skills
-- `skills/*.ts` - Example skill implementations
+- `ksa/README.md` - KSA documentation and examples
+- `ksa/*.ts` - KSA implementations

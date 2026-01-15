@@ -11,7 +11,7 @@
  * 5. Feed output back to LLM
  * 6. Repeat until task complete
  *
- * The agent imports from /home/user/skills/ to use available capabilities.
+ * The agent imports from /home/user/ksa/ (KSAs - Knowledge, Skills, Abilities).
  */
 
 import { internal } from "../_generated/api";
