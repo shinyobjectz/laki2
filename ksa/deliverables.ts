@@ -1,0 +1,295 @@
+/**
+ * Deliverables KSA - Knowledge, Skills, and Abilities
+ *
+ * Save and retrieve artifacts (deliverables) that persist across sandbox sessions.
+ * Use this to create outputs that will be available after the agent finishes.
+ *
+ * @example
+ * import { saveArtifact, readArtifact, listArtifacts } from './ksa/deliverables';
+ *
+ * // Save a markdown report
+ * await saveArtifact({
+ *   name: 'market-analysis-report.md',
+ *   type: 'markdown',
+ *   content: '# Market Analysis\n\n...',
+ * });
+ *
+ * // Read a previous artifact
+ * const report = await readArtifact('abc123');
+ *
+ * // List all artifacts
+ * const artifacts = await listArtifacts();
+ */
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface Artifact {
+  id: string;
+  name: string;
+  type: "markdown" | "json" | "csv" | "text" | "html" | "pdf";
+  content?: string;
+  createdAt?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SaveArtifactParams {
+  name: string;
+  type: "markdown" | "json" | "csv" | "text" | "html";
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SaveResult {
+  success: boolean;
+  id?: string;
+  name?: string;
+  error?: string;
+}
+
+export interface ReadResult {
+  success: boolean;
+  name?: string;
+  type?: string;
+  content?: string;
+  createdAt?: number;
+  metadata?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface ListResult {
+  success: boolean;
+  artifacts: Artifact[];
+  count: number;
+  error?: string;
+}
+
+// ============================================================================
+// Gateway Config (set by runtime)
+// ============================================================================
+
+let gatewayConfig: { convexUrl: string; jwt: string; cardId?: string } | null =
+  null;
+
+/**
+ * Set the gateway config for cloud operations.
+ * Called by the runtime when starting a session.
+ */
+export function setGatewayConfig(config: {
+  convexUrl: string;
+  jwt: string;
+  cardId?: string;
+}) {
+  gatewayConfig = config;
+}
+
+// ============================================================================
+// Internal: Cloud Communication
+// ============================================================================
+
+async function callCloud(
+  servicePath: string,
+  args: Record<string, unknown>,
+  type: "query" | "action" | "mutation" = "query"
+): Promise<any> {
+  const convexUrl = gatewayConfig?.convexUrl || process.env.CONVEX_URL;
+  const jwt = gatewayConfig?.jwt || process.env.SANDBOX_JWT;
+
+  if (!convexUrl || !jwt) {
+    console.log("[deliverables] Gateway not configured");
+    return { error: "Gateway not configured" };
+  }
+
+  try {
+    const response = await fetch(`${convexUrl}/agent/call`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ path: servicePath, type, args }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[deliverables] Cloud call failed: ${error}`);
+      return { error };
+    }
+
+    const result = await response.json();
+    if (!result.ok) {
+      console.error(`[deliverables] Cloud error: ${result.error}`);
+      return { error: result.error };
+    }
+
+    return result.data;
+  } catch (error) {
+    console.error(`[deliverables] Cloud exception: ${error}`);
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// ============================================================================
+// Skills: Saving Artifacts
+// ============================================================================
+
+/**
+ * Save an artifact (deliverable) to the cloud.
+ *
+ * Use this for markdown, JSON, CSV, or text files.
+ * For PDFs, use the `pdf.generate()` function instead.
+ *
+ * @param params - Name, type, content, and optional metadata
+ * @returns Result with success status and artifact ID
+ *
+ * @example
+ * // Save a markdown report
+ * const result = await saveArtifact({
+ *   name: 'competitive-analysis.md',
+ *   type: 'markdown',
+ *   content: '# Competitive Analysis\n\n## Overview\n...',
+ * });
+ *
+ * if (result.success) {
+ *   console.log(`Saved: ${result.name} (${result.id})`);
+ * }
+ *
+ * @example
+ * // Save JSON data
+ * await saveArtifact({
+ *   name: 'research-data.json',
+ *   type: 'json',
+ *   content: JSON.stringify(data, null, 2),
+ * });
+ */
+export async function saveArtifact(
+  params: SaveArtifactParams
+): Promise<SaveResult> {
+  // Reject PDF - must use pdf.generate()
+  if ((params.type as string) === "pdf") {
+    return {
+      success: false,
+      error:
+        "Cannot save PDF with saveArtifact. Use pdf.generate() from ./ksa/pdf instead.",
+    };
+  }
+
+  const cardId = gatewayConfig?.cardId || process.env.CARD_ID;
+  if (!cardId) {
+    return { success: false, error: "No cardId available" };
+  }
+
+  const result = await callCloud(
+    "features.kanban.artifacts.saveArtifactWithBackup",
+    {
+      cardId,
+      artifact: {
+        name: params.name,
+        type: params.type,
+        content: params.content,
+        metadata: params.metadata,
+      },
+    },
+    "action"
+  );
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  console.log(`[deliverables] Saved artifact: ${params.name}`);
+  return {
+    success: true,
+    id: result,
+    name: params.name,
+  };
+}
+
+// ============================================================================
+// Skills: Reading Artifacts
+// ============================================================================
+
+/**
+ * Read an artifact by its ID.
+ *
+ * Use this to access documents created in earlier stages.
+ *
+ * @param artifactId - ID of the artifact (from context artifacts list)
+ * @returns Artifact content and metadata
+ *
+ * @example
+ * const report = await readArtifact('abc123');
+ * if (report.success) {
+ *   console.log(report.content);
+ * }
+ */
+export async function readArtifact(artifactId: string): Promise<ReadResult> {
+  const result = await callCloud(
+    "features.kanban.artifacts.getArtifact",
+    { artifactId },
+    "query"
+  );
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  if (!result) {
+    return { success: false, error: `Artifact not found: ${artifactId}` };
+  }
+
+  console.log(`[deliverables] Read artifact: ${result.name}`);
+  return {
+    success: true,
+    name: result.name,
+    type: result.type,
+    content: result.content,
+    createdAt: result.createdAt,
+    metadata: result.metadata,
+  };
+}
+
+/**
+ * List all artifacts for the current card.
+ *
+ * Shows artifacts from all stages.
+ *
+ * @returns List of artifacts with IDs, names, and types
+ *
+ * @example
+ * const { artifacts } = await listArtifacts();
+ * for (const art of artifacts) {
+ *   console.log(`${art.name} (${art.type})`);
+ * }
+ */
+export async function listArtifacts(): Promise<ListResult> {
+  const cardId = gatewayConfig?.cardId || process.env.CARD_ID;
+  if (!cardId) {
+    return { success: false, error: "No cardId available", artifacts: [], count: 0 };
+  }
+
+  const result = await callCloud(
+    "features.kanban.artifacts.listCardArtifacts",
+    { cardId },
+    "query"
+  );
+
+  if (result.error) {
+    return { success: false, error: result.error, artifacts: [], count: 0 };
+  }
+
+  const artifacts = Array.isArray(result) ? result : [];
+  console.log(`[deliverables] Listed ${artifacts.length} artifacts`);
+
+  return {
+    success: true,
+    artifacts: artifacts.map((a: any) => ({
+      id: a._id,
+      name: a.name,
+      type: a.type,
+      createdAt: a.createdAt,
+    })),
+    count: artifacts.length,
+  };
+}

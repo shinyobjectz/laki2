@@ -63,8 +63,45 @@ const entries = await ls('/home/user/workspace');
 \`\`\`typescript
 import { generate } from './ksa/pdf';
 
-// Generate PDF from markdown
-await generate('# Title\\n\\nContent...', 'output-name');
+// Generate PDF from markdown (auto-saves to artifacts)
+// Content should start with ONE # heading - this becomes the title
+await generate({
+  filename: 'quarterly-report',
+  content: '# Quarterly Report\\n\\n## Summary\\n...'
+});
+\`\`\`
+
+### Deliverables KSA (\`./ksa/deliverables\`)
+\`\`\`typescript
+import { saveArtifact, readArtifact, listArtifacts } from './ksa/deliverables';
+
+// Save a markdown artifact (for non-PDF deliverables)
+await saveArtifact({
+  name: 'market-analysis.md',
+  type: 'markdown',
+  content: '# Market Analysis\\n\\n...'
+});
+
+// Read a previous artifact
+const artifact = await readArtifact('artifact-id');
+
+// List all artifacts
+const { artifacts } = await listArtifacts();
+\`\`\`
+
+### Context KSA (\`./ksa/context\`)
+\`\`\`typescript
+import { getContext, setVariable, getVariable } from './ksa/context';
+
+// Get card context (variables, artifact count)
+const ctx = await getContext();
+console.log(ctx.variables);
+
+// Set a variable for later stages
+await setVariable('targetAudience', 'enterprise developers');
+
+// Get a specific variable
+const audience = await getVariable('targetAudience');
 \`\`\`
 
 ### Task Tracking KSA (\`./ksa/beads\`)

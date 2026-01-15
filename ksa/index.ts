@@ -13,7 +13,11 @@
 export * as file from "./file";
 export * as browser from "./browser";
 export * as beads from "./beads";
+
+// Content Creation KSAs
 export * as pdf from "./pdf";
+export * as deliverables from "./deliverables";
+export * as context from "./context";
 
 // Research KSAs (gateway operations)
 export * as web from "./web";
@@ -67,6 +71,20 @@ export const KSA_REGISTRY: KSAInfo[] = [
     category: "create",
     functions: ["generate"],
     importPath: "./ksa/pdf",
+  },
+  {
+    name: "deliverables",
+    description: "Save and retrieve artifacts that persist across stages",
+    category: "create",
+    functions: ["saveArtifact", "readArtifact", "listArtifacts"],
+    importPath: "./ksa/deliverables",
+  },
+  {
+    name: "context",
+    description: "Manage card context and variables across stages",
+    category: "system",
+    functions: ["getContext", "setVariable", "getVariable"],
+    importPath: "./ksa/context",
   },
 
   // Research KSAs
