@@ -199,21 +199,13 @@ export async function createBoard(
     "internal.features.kanban.boards.createInternal",
     {
       name,
+      description: options?.description,
       workspaceMode: options?.workspaceMode || "per_card",
       blank: hasCustomStages, // Skip default tasks if custom stages
     },
     "mutation"
   );
   const boardId = response;
-
-  // Update description if provided
-  if (options?.description) {
-    await callGateway(
-      "internal.features.kanban.boards.updateInternal",
-      { id: boardId, description: options.description },
-      "mutation"
-    );
-  }
 
   // Add custom stages if provided
   if (hasCustomStages && options.stages) {
