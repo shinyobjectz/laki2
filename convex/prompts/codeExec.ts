@@ -370,6 +370,12 @@ const demographics = await getAudienceDemographics('username');
 
   // App service KSAs
   boards: `### Boards KSA (\`./ksa/boards\`) - Create and manage workflow boards
+
+**IMPORTANT: When creating boards, ALWAYS design appropriate stages based on the workflow purpose.**
+- Analyze what the board is for and create stages that match the workflow
+- Each stage needs: name, stageType ('agent' or 'human'), and optionally goals/skills
+- Don't just create an empty board - design the full workflow pipeline
+
 \`\`\`typescript
 import { listBoards, createBoard, getBoard, addCard, runCard, waitForCard, getCompletedCards, listTemplates, createBoardFromTemplate } from './ksa/boards';
 
@@ -377,22 +383,45 @@ import { listBoards, createBoard, getBoard, addCard, runCard, waitForCard, getCo
 const boards = await listBoards();
 console.log('Boards:', boards.map(b => b.name));
 
-// Create a new workflow board with stages
+// ALWAYS design proper stages when creating a board
+// Think about: What steps does this workflow need? Which are automated vs manual?
 // Signature: createBoard(name: string, options?: { description?, stages?, workspaceMode? })
-const boardId = await createBoard('Content Pipeline', {
-  description: 'Automated content creation workflow',
+
+// Example 1: Content creation workflow
+const contentBoardId = await createBoard('Content Pipeline', {
+  description: 'Automated content creation workflow with human review',
   stages: [
-    { name: 'Research', type: 'agent', skillIds: ['web', 'news'] },
-    { name: 'Draft', type: 'agent', skillIds: ['generate'] },
-    { name: 'Review', type: 'human' },
-    { name: 'Publish', type: 'agent', skillIds: ['publish'] }
+    { name: 'Research', stageType: 'agent', goals: ['Find 5 relevant sources', 'Identify key points'] },
+    { name: 'Draft', stageType: 'agent', goals: ['Write first draft based on research'] },
+    { name: 'Review', stageType: 'human' }, // Human reviews draft
+    { name: 'Finalize', stageType: 'agent', goals: ['Apply reviewer feedback', 'Format for publication'] }
   ]
 });
-console.log('Created board:', boardId);
+
+// Example 2: Research workflow
+const researchBoardId = await createBoard('Market Research', {
+  description: 'Comprehensive market research pipeline',
+  stages: [
+    { name: 'Gather Data', stageType: 'agent', goals: ['Collect market data', 'Find competitor info'] },
+    { name: 'Analyze', stageType: 'agent', goals: ['Identify trends', 'Calculate market size'] },
+    { name: 'Report', stageType: 'agent', goals: ['Generate comprehensive report'] },
+    { name: 'Executive Review', stageType: 'human' } // Human approves final report
+  ]
+});
+
+// Example 3: Brand analysis workflow
+const brandBoardId = await createBoard('Brand Analysis', {
+  description: 'Analyze a brand and generate insights',
+  stages: [
+    { name: 'Brand Scan', stageType: 'agent', goals: ['Run brand intelligence scan'] },
+    { name: 'Social Audit', stageType: 'agent', goals: ['Analyze social media presence'] },
+    { name: 'Competitor Comparison', stageType: 'agent', goals: ['Compare with 3 competitors'] },
+    { name: 'Strategy Review', stageType: 'human' } // Human reviews strategy recommendations
+  ]
+});
 
 // Add a card to the board
-// Signature: addCard(boardId, taskId, name, options?)
-const cardId = await addCard(boardId, 'task-001', 'Write blog post about AI', {
+const cardId = await addCard(contentBoardId, 'task-001', 'Write blog post about AI', {
   data: { topic: 'AI trends', depth: 'comprehensive' },
   autoRun: false // Set true to start execution immediately
 });
@@ -405,16 +434,16 @@ const result = await waitForCard(cardId, 300000); // 5 min timeout
 console.log('Card completed:', result);
 
 // Get all completed cards from a board
-const completed = await getCompletedCards(boardId);
+const completed = await getCompletedCards(contentBoardId);
 console.log('Completed cards:', completed.length);
 
 // List available templates
 const templates = await listTemplates();
 console.log('Templates:', templates.map(t => t.name));
 
-// Create board from a template
-// Signature: createBoardFromTemplate(templateId: string, name?: string)
-const newBoardId = await createBoardFromTemplate('template-id', 'My New Board');
+// Create board from a template (alternative to designing stages manually)
+// Available templates: 'research-report', 'content-pipeline', 'data-analysis', 'competitor-research'
+const newBoardId = await createBoardFromTemplate('research-report', 'My Research Project');
 \`\`\``,
 
   brandscan: `### Brand Scan KSA (\`./ksa/brandscan\`) - Brand intelligence scanning

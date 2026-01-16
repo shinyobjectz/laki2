@@ -4,16 +4,22 @@
  * Manage and execute kanban boards programmatically.
  * Use this to create boards, add cards, and trigger automated execution.
  *
+ * IMPORTANT: When creating boards, ALWAYS design appropriate stages.
+ * Each stage needs: name, stageType ('agent' or 'human'), and optionally goals.
+ *
  * @example
  * import { listBoards, createBoard, addCard, runCard } from './ksa/boards';
  *
  * // List all boards
  * const boards = await listBoards();
  *
- * // Create a new board
+ * // Create a board with well-designed stages
  * const boardId = await createBoard('Research Pipeline', {
+ *   description: 'Automated research workflow',
  *   stages: [
- *     { name: 'Research', stageType: 'agent' },
+ *     { name: 'Gather Data', stageType: 'agent', goals: ['Find 5 sources'] },
+ *     { name: 'Analyze', stageType: 'agent', goals: ['Identify key trends'] },
+ *     { name: 'Report', stageType: 'agent', goals: ['Generate summary report'] },
  *     { name: 'Review', stageType: 'human' }
  *   ]
  * });
