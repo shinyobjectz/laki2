@@ -178,9 +178,41 @@ export async function saveArtifact(
     };
   }
 
+  // Check for thread-based or card-based context
+  const threadId = process.env.THREAD_ID;
   const cardId = gatewayConfig?.cardId || process.env.CARD_ID;
+
+  // Thread artifacts (agent chat threads)
+  if (threadId) {
+    const result = await callCloud(
+      "agent.workflows.crudThreads.saveThreadArtifact",
+      {
+        threadId,
+        artifact: {
+          name: params.name,
+          type: params.type,
+          content: params.content,
+          metadata: params.metadata,
+        },
+      },
+      "mutation"
+    );
+
+    if (result.error) {
+      return { success: false, error: result.error };
+    }
+
+    console.log(`[artifacts] Saved thread artifact: ${params.name}`);
+    return {
+      success: true,
+      id: result,
+      name: params.name,
+    };
+  }
+
+  // Card artifacts (kanban workflows)
   if (!cardId) {
-    return { success: false, error: "No cardId available" };
+    return { success: false, error: "No cardId or threadId available" };
   }
 
   const result = await callCloud(
@@ -254,9 +286,10 @@ export async function readArtifact(artifactId: string): Promise<ReadResult> {
 }
 
 /**
- * List all artifacts for the current card.
+ * List all artifacts for the current context (thread or card).
  *
- * Shows artifacts from all stages.
+ * For threads: Shows artifacts saved in this chat thread.
+ * For cards: Shows artifacts from all stages.
  *
  * @returns List of artifacts with IDs, names, and types
  *
@@ -267,9 +300,40 @@ export async function readArtifact(artifactId: string): Promise<ReadResult> {
  * }
  */
 export async function listArtifacts(): Promise<ListResult> {
+  // Check for thread-based or card-based context
+  const threadId = process.env.THREAD_ID;
   const cardId = gatewayConfig?.cardId || process.env.CARD_ID;
+
+  // Thread artifacts
+  if (threadId) {
+    const result = await callCloud(
+      "internal.agent.workflows.crudThreads.listThreadArtifactsInternal",
+      { threadId },
+      "query"
+    );
+
+    if (result.error) {
+      return { success: false, error: result.error, artifacts: [], count: 0 };
+    }
+
+    const artifacts = Array.isArray(result) ? result : [];
+    console.log(`[artifacts] Listed ${artifacts.length} thread artifacts`);
+
+    return {
+      success: true,
+      artifacts: artifacts.map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        createdAt: a.createdAt,
+      })),
+      count: artifacts.length,
+    };
+  }
+
+  // Card artifacts
   if (!cardId) {
-    return { success: false, error: "No cardId available", artifacts: [], count: 0 };
+    return { success: false, error: "No cardId or threadId available", artifacts: [], count: 0 };
   }
 
   const result = await callCloud(
