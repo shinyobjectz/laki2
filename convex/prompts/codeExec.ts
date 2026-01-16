@@ -102,14 +102,15 @@ const audience = await getVariable('targetAudience');
 \`\`\`typescript
 import { create, update, close, list, get } from './ksa/beads';
 
-// IMPORTANT: Use beads for task planning
+// IMPORTANT: create() returns { success, id, error? } - use .id for updates
 const task1 = await create({ title: 'Research topic', type: 'task', priority: 1 });
+console.log('Created task:', task1.id); // Use task1.id, NOT task1
 
-// Update as you work
-await update(task1, { status: 'in_progress' });
+// Update as you work - pass the ID string
+await update(task1.id, { status: 'in_progress' });
 
-// Mark complete when done
-await close(task1, 'Found 5 relevant sources');
+// Mark complete when done - pass the ID string
+await close(task1.id, 'Found 5 relevant sources');
 
 // List remaining tasks
 const remaining = await list({ status: 'open' });
@@ -390,9 +391,10 @@ const boardId = await createBoard('Content Pipeline', {
 console.log('Created board:', boardId);
 
 // Add a card to the board
-const cardId = await addCard(boardId, {
-  title: 'Write blog post about AI',
-  description: 'Create a comprehensive blog post'
+// Signature: addCard(boardId, taskId, name, options?)
+const cardId = await addCard(boardId, 'task-001', 'Write blog post about AI', {
+  data: { topic: 'AI trends', depth: 'comprehensive' },
+  autoRun: false // Set true to start execution immediately
 });
 
 // Start automated execution of the card
@@ -623,7 +625,7 @@ This enables proper tracking and retry handling.
 \`\`\`json
 {
   "thinking": "I need to plan my work using beads, then search for AI news and save results",
-  "code": "import { create, update, close } from './ksa/beads';\\n\\n// Create work plan\\nconst searchTask = await create({ title: 'Search for AI news', type: 'task', priority: 1 });\\nconst summaryTask = await create({ title: 'Create summary document', type: 'task', priority: 2 });\\nconsole.log('Created tasks:', searchTask, summaryTask);\\n\\n// Start first task\\nawait update(searchTask, { status: 'in_progress' });",
+  "code": "import { create, update, close } from './ksa/beads';\\n\\n// Create work plan (create returns { success, id })\\nconst searchTask = await create({ title: 'Search for AI news', type: 'task', priority: 1 });\\nconst summaryTask = await create({ title: 'Create summary document', type: 'task', priority: 2 });\\nconsole.log('Created tasks:', searchTask.id, summaryTask.id);\\n\\n// Start first task - use .id for updates\\nawait update(searchTask.id, { status: 'in_progress' });",
   "response": ""
 }
 \`\`\`
