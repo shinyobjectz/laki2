@@ -1,17 +1,18 @@
 #!/usr/bin/env bun
 /**
- * KSA Indexer
+ * KSA Indexer & Registry Generator
  *
- * Parses KSA TypeScript files and extracts metadata:
- * - Module-level JSDoc description
- * - Exported functions with their JSDoc, parameters, and examples
- * - Type exports
+ * Generates registry files from KSA source files.
+ * The source of truth is packages/lakitu/ksa/index.ts which contains
+ * the manually curated KSA_REGISTRY.
  *
  * Usage:
- *   bun packages/lakitu/scripts/index-ksas.ts
- *   bun packages/lakitu/scripts/index-ksas.ts --json
- *   bun packages/lakitu/scripts/index-ksas.ts --generate-registry
- *   bun packages/lakitu/scripts/index-ksas.ts --generate-skills
+ *   bun packages/lakitu/scripts/index-ksas.ts                # Print summary
+ *   bun packages/lakitu/scripts/index-ksas.ts --json         # Output raw JSON
+ *   bun packages/lakitu/scripts/index-ksas.ts --generate     # Generate Lakitu registry
+ *   bun packages/lakitu/scripts/index-ksas.ts --generate-convex  # Generate Convex registry
+ *   bun packages/lakitu/scripts/index-ksas.ts --generate-docs    # Generate reference docs
+ *   bun packages/lakitu/scripts/index-ksas.ts --all          # Generate all outputs
  */
 
 import * as ts from "typescript";
@@ -19,8 +20,11 @@ import * as fs from "fs";
 import * as path from "path";
 
 // ============================================================================
-// Types
+// Types (aligned with @ksa-types)
 // ============================================================================
+
+export type KSACategory = "core" | "skills" | "deliverables";
+export type KSAGroup = "research";
 
 export interface KSAFunctionMeta {
   name: string;
@@ -44,15 +48,15 @@ export interface KSATypeMeta {
 export interface KSAModuleMeta {
   name: string;
   description: string;
-  category: "system" | "research" | "data" | "create" | "ai";
+  category: KSACategory;
+  group?: KSAGroup;
   functions: KSAFunctionMeta[];
   types: KSATypeMeta[];
   importPath: string;
   filePath: string;
-  /** Convex service paths this KSA calls via gateway */
   servicePaths: string[];
-  /** Whether this KSA is local-only (no gateway calls) */
   isLocal: boolean;
+  icon?: string;
 }
 
 // ============================================================================
@@ -76,7 +80,8 @@ function parseKSAFile(filePath: string): KSAModuleMeta | null {
   }
 
   let moduleDescription = "";
-  let category: KSAModuleMeta["category"] = "system";
+  let category: KSACategory = "skills";
+  let group: KSAGroup | undefined;
   const functions: KSAFunctionMeta[] = [];
   const types: KSATypeMeta[] = [];
 
@@ -89,7 +94,9 @@ function parseKSAFile(filePath: string): KSAModuleMeta | null {
       const commentText = sourceText.slice(firstComment.pos, firstComment.end);
       if (commentText.startsWith("/**")) {
         moduleDescription = parseJSDocDescription(commentText);
-        category = inferCategory(fileName, moduleDescription);
+        const parsed = parseJSDocTags(commentText);
+        category = parsed.category || inferCategory(fileName, moduleDescription);
+        group = parsed.group;
       }
     }
   }
@@ -174,6 +181,7 @@ function parseKSAFile(filePath: string): KSAModuleMeta | null {
     name: fileName,
     description: moduleDescription,
     category,
+    group,
     functions,
     types,
     importPath,
@@ -184,10 +192,28 @@ function parseKSAFile(filePath: string): KSAModuleMeta | null {
 }
 
 /**
+ * Extract @category and @group tags from JSDoc
+ */
+function parseJSDocTags(jsDoc: string): { category?: KSACategory; group?: KSAGroup } {
+  const result: { category?: KSACategory; group?: KSAGroup } = {};
+
+  // Look for @category tag
+  const categoryMatch = jsDoc.match(/@category\s+(core|skills|deliverables)/i);
+  if (categoryMatch) {
+    result.category = categoryMatch[1].toLowerCase() as KSACategory;
+  }
+
+  // Look for @group tag
+  const groupMatch = jsDoc.match(/@group\s+(research)/i);
+  if (groupMatch) {
+    result.group = groupMatch[1].toLowerCase() as KSAGroup;
+  }
+
+  return result;
+}
+
+/**
  * Extract all gateway service paths from source text.
- * Looks for patterns like:
- *   - callGateway('services.Valyu.internal.search', ...)
- *   - callCloud('features.kanban.artifacts.saveArtifactWithBackup', ...)
  */
 function extractServicePaths(sourceText: string): string[] {
   const paths = new Set<string>();
@@ -200,7 +226,6 @@ function extractServicePaths(sourceText: string): string[] {
   }
 
   // Match callCloud("path", ...) or callCloud('path', ...)
-  // This is used in artifacts.ts and context.ts
   const cloudRegex = /callCloud\s*\(\s*["'`]([^"'`]+)["'`]/g;
   while ((match = cloudRegex.exec(sourceText)) !== null) {
     paths.add(match[1]);
@@ -366,7 +391,6 @@ function parseJSDoc(jsDoc: string): ParsedJSDoc {
 
     if (trimmed.startsWith("@param")) {
       currentSection = "param";
-      // Parse @param name - description or @param {type} name - description
       const match = trimmed.match(
         /@param\s+(?:\{[^}]+\}\s+)?(\w+)\s*-?\s*(.*)/
       );
@@ -407,42 +431,26 @@ function parseJSDoc(jsDoc: string): ParsedJSDoc {
 function inferCategory(
   name: string,
   description: string
-): KSAModuleMeta["category"] {
+): KSACategory {
   const lower = (name + " " + description).toLowerCase();
 
+  // Core KSAs
   if (
-    lower.includes("file") ||
-    lower.includes("browser") ||
-    lower.includes("beads") ||
-    lower.includes("context")
+    name === "file" ||
+    name === "context" ||
+    name === "artifacts" ||
+    name === "beads"
   ) {
-    return "system";
-  }
-  if (
-    lower.includes("search") ||
-    lower.includes("web") ||
-    lower.includes("news") ||
-    lower.includes("social")
-  ) {
-    return "research";
-  }
-  if (
-    lower.includes("compan") ||
-    lower.includes("enrich") ||
-    lower.includes("firmograph")
-  ) {
-    return "data";
-  }
-  if (
-    lower.includes("pdf") ||
-    lower.includes("email") ||
-    lower.includes("deliverable") ||
-    lower.includes("artifact")
-  ) {
-    return "create";
+    return "core";
   }
 
-  return "system";
+  // Deliverables
+  if (name === "pdf" || name === "email") {
+    return "deliverables";
+  }
+
+  // Default to skills
+  return "skills";
 }
 
 // ============================================================================
@@ -456,7 +464,7 @@ function indexKSAs(ksaDir: string): KSAModuleMeta[] {
     return (
       f.endsWith(".ts") &&
       !f.startsWith("_") &&
-      f !== "index.ts" // Skip index file
+      f !== "index.ts"
     );
   });
 
@@ -475,51 +483,76 @@ function indexKSAs(ksaDir: string): KSAModuleMeta[] {
 // Generators
 // ============================================================================
 
-function generateKSARegistry(modules: KSAModuleMeta[]): string {
+function generateLakituRegistry(modules: KSAModuleMeta[]): string {
   const entries = modules.map((m) => {
     const functions = m.functions.map((f) => `"${f.name}"`).join(", ");
     const servicePaths = m.servicePaths.map((p) => `"${p}"`).join(", ");
+    const group = m.group ? `\n    group: "${m.group}" as const,` : "";
+    const icon = m.icon ? `\n    icon: "${m.icon}",` : "";
     return `  {
     name: "${m.name}",
     description: "${m.description.replace(/"/g, '\\"')}",
-    category: "${m.category}",
+    category: "${m.category}" as const,${group}
     functions: [${functions}],
     importPath: "${m.importPath}",
     servicePaths: [${servicePaths}],
-    isLocal: ${m.isLocal},
+    isLocal: ${m.isLocal},${icon}
   }`;
   });
 
   return `/**
- * KSA Registry - Auto-generated
+ * KSA Registry - Auto-generated for Lakitu
  *
- * DO NOT EDIT MANUALLY - run \`bun packages/lakitu/scripts/index-ksas.ts --generate-registry\`
+ * DO NOT EDIT MANUALLY - run \`bun generate:ksa\`
  *
  * Generated at: ${new Date().toISOString()}
+ *
+ * This file is generated from the source of truth at:
+ * packages/lakitu/ksa/*.ts
  */
+
+// ============================================================================
+// Types (defined inline for sandbox compatibility)
+// ============================================================================
+
+export type KSACategory = "core" | "skills" | "deliverables";
+export type KSAGroup = "research";
 
 export interface KSAInfo {
   name: string;
   description: string;
-  category: "system" | "research" | "data" | "create" | "ai";
+  category: KSACategory;
+  group?: KSAGroup;
   functions: string[];
   importPath: string;
-  /** Convex service paths this KSA calls via gateway */
   servicePaths: string[];
-  /** Whether this KSA is local-only (no gateway calls) */
   isLocal: boolean;
+  icon?: string;
 }
+
+// ============================================================================
+// Generated Registry
+// ============================================================================
 
 export const KSA_REGISTRY: KSAInfo[] = [
 ${entries.join(",\n")}
 ];
 
+// ============================================================================
 // Discovery functions
+// ============================================================================
+
 export const getAllKSAs = () => KSA_REGISTRY;
-export const getKSAsByCategory = (category: KSAInfo["category"]) =>
+
+export const getKSAsByCategory = (category: KSACategory) =>
   KSA_REGISTRY.filter((k) => k.category === category);
+
 export const getKSA = (name: string) =>
   KSA_REGISTRY.find((k) => k.name === name);
+
+export const getKSAsByNames = (names: string[]) =>
+  KSA_REGISTRY.filter((k) => names.includes(k.name));
+
 export const searchKSAs = (keyword: string) => {
   const lower = keyword.toLowerCase();
   return KSA_REGISTRY.filter(
@@ -530,6 +563,9 @@ export const searchKSAs = (keyword: string) => {
   );
 };
 
+/** Names of core KSAs that are always available */
+export const CORE_KSAS = KSA_REGISTRY.filter((k) => k.category === "core").map((k) => k.name);
+
 // ============================================================================
 // Policy Functions
 // ============================================================================
@@ -537,9 +573,6 @@ export const searchKSAs = (keyword: string) => {
 /**
  * Get allowed service paths for a set of KSA names.
  * Used by gateway to enforce access control.
- *
- * @param ksaNames - Array of KSA names (e.g., ["web", "pdf", "artifacts"])
- * @returns Array of allowed service paths
  */
 export function getServicePathsForKSAs(ksaNames: string[]): string[] {
   const paths = new Set<string>();
@@ -558,94 +591,149 @@ export function getServicePathsForKSAs(ksaNames: string[]): string[] {
  * Check if a service path is allowed for the given KSAs.
  */
 export function isServicePathAllowed(path: string, allowedKSAs: string[]): boolean {
-  const allowedPaths = getServicePathsForKSAs(allowedKSAs);
-  return allowedPaths.includes(path);
+  // Core KSAs are always allowed
+  const allAllowed = [...CORE_KSAS, ...allowedKSAs];
+  const allowedPaths = getServicePathsForKSAs(allAllowed);
+  return allowedPaths.some((p) => path.startsWith(p) || p.startsWith(path));
 }
 `;
 }
 
-function generateSkillsMapping(modules: KSAModuleMeta[]): string {
-  // Map KSAs to skills with reasonable defaults
-  const skillMappings: Array<{
-    ksaName: string;
-    skillId: string;
-    skillName: string;
-    description: string;
-    icon: string;
-    category: string;
-    functions: string[];
-  }> = [];
-
-  const iconMap: Record<string, string> = {
-    web: "mdi:magnify",
-    file: "mdi:file-document",
-    pdf: "mdi:file-pdf-box",
-    email: "mdi:email-send",
-    browser: "mdi:web",
-    beads: "mdi:format-list-checks",
-    news: "mdi:newspaper",
-    social: "mdi:account-multiple",
-    companies: "mdi:office-building",
-    artifacts: "mdi:package-variant-closed",
-    context: "mdi:cog",
-  };
-
-  const categoryMap: Record<string, string> = {
-    system: "workflow",
-    research: "research",
-    data: "research",
-    create: "content",
-    ai: "research",
-  };
-
-  for (const m of modules) {
-    skillMappings.push({
-      ksaName: m.name,
-      skillId: m.name,
-      skillName: m.name.charAt(0).toUpperCase() + m.name.slice(1),
-      description: m.description,
-      icon: iconMap[m.name] || "mdi:puzzle",
-      category: categoryMap[m.category] || "workflow",
-      functions: m.functions.map((f) => f.name),
-    });
-  }
-
-  const entries = skillMappings.map((s) => {
-    const funcs = s.functions.slice(0, 3).join("(), ") + "()";
-    const prompt = `Use ${funcs} from ./ksa/${s.ksaName}.`;
+function generateConvexRegistry(modules: KSAModuleMeta[]): string {
+  const entries = modules.map((m) => {
+    const functions = m.functions.map((f) => `"${f.name}"`).join(", ");
+    const servicePaths = m.servicePaths.map((p) => `"${p}"`).join(", ");
+    const group = m.group ? `\n    group: "${m.group}" as const,` : "";
+    const icon = m.icon ? `\n    icon: "${m.icon}",` : "";
     return `  {
-    id: "${s.skillId}",
-    name: "${s.skillName}",
-    description: "${s.description.replace(/"/g, '\\"')}",
-    icon: "${s.icon}",
-    category: "${s.category}",
-    toolIds: ["${s.ksaName}"],
-    prompt: "${prompt.replace(/"/g, '\\"')}",
+    name: "${m.name}",
+    description: "${m.description.replace(/"/g, '\\"')}",
+    category: "${m.category}" as const,${group}
+    functions: [${functions}],
+    importPath: "${m.importPath}",
+    servicePaths: [${servicePaths}],
+    isLocal: ${m.isLocal},${icon}
   }`;
   });
 
   return `/**
- * Skills derived from KSAs - Auto-generated base
+ * KSA Registry - Auto-generated for Convex
  *
- * This is a BASE that can be customized.
- * For the full SKILLS_META, see packages/primitives/agent/src/metadata.ts
+ * DO NOT EDIT MANUALLY - run \`bun generate:ksa\`
  *
  * Generated at: ${new Date().toISOString()}
+ *
+ * This file is generated from the source of truth at:
+ * packages/lakitu/ksa/*.ts
  */
 
-export interface SkillFromKSA {
-  id: string;
+// ============================================================================
+// Types (duplicated to avoid import issues in Convex)
+// ============================================================================
+
+export type KSACategory = "core" | "skills" | "deliverables";
+export type KSAGroup = "research";
+
+export interface KSAInfo {
   name: string;
   description: string;
-  icon: string;
-  category: string;
-  toolIds: string[];
-  prompt: string;
+  category: KSACategory;
+  group?: KSAGroup;
+  functions: string[];
+  importPath: string;
+  servicePaths: string[];
+  isLocal: boolean;
+  icon?: string;
 }
 
-export const KSA_DERIVED_SKILLS: SkillFromKSA[] = [
+// ============================================================================
+// Generated Registry
+// ============================================================================
+
+export const KSA_REGISTRY: KSAInfo[] = [
 ${entries.join(",\n")}
 ];
+
+// ============================================================================
+// Discovery functions
+// ============================================================================
+
+export const getAllKSAs = () => KSA_REGISTRY;
+
+export const getKSAsByCategory = (category: KSACategory) =>
+  KSA_REGISTRY.filter((k) => k.category === category);
+
+export const getKSA = (name: string) =>
+  KSA_REGISTRY.find((k) => k.name === name);
+
+export const getKSAsByNames = (names: string[]) =>
+  KSA_REGISTRY.filter((k) => names.includes(k.name));
+
+export const searchKSAs = (keyword: string) => {
+  const lower = keyword.toLowerCase();
+  return KSA_REGISTRY.filter(
+    (k) =>
+      k.name.toLowerCase().includes(lower) ||
+      k.description.toLowerCase().includes(lower) ||
+      k.functions.some((f) => f.toLowerCase().includes(lower))
+  );
+};
+
+/** Names of core KSAs that are always available */
+export const CORE_KSAS = KSA_REGISTRY.filter((k) => k.category === "core").map((k) => k.name);
+
+// ============================================================================
+// Policy Functions
+// ============================================================================
+
+/**
+ * Get allowed service paths for a set of KSA names.
+ * Core KSAs are always included.
+ */
+export function getServicePathsForKSAs(ksaNames: string[]): string[] {
+  const paths = new Set<string>();
+
+  // Always include core KSAs
+  const allKSAs = [...CORE_KSAS, ...ksaNames];
+
+  for (const name of allKSAs) {
+    const ksa = getKSA(name);
+    if (ksa) {
+      for (const path of ksa.servicePaths) {
+        paths.add(path);
+      }
+    }
+  }
+
+  return Array.from(paths);
+}
+
+/**
+ * Check if a service path is allowed for the given KSAs.
+ * Core KSAs are always allowed.
+ */
+export function isServicePathAllowed(path: string, allowedKSAs: string[]): boolean {
+  const allowedPaths = getServicePathsForKSAs(allowedKSAs);
+  return allowedPaths.some((p) => path.startsWith(p) || p.startsWith(path));
+}
+
+/**
+ * Validate KSA names are all recognized.
+ */
+export function validateKSAs(ksaNames: string[]): { valid: string[]; invalid: string[] } {
+  const valid: string[] = [];
+  const invalid: string[] = [];
+
+  for (const name of ksaNames) {
+    if (getKSA(name)) {
+      valid.push(name);
+    } else {
+      invalid.push(name);
+    }
+  }
+
+  return { valid, invalid };
+}
 `;
 }
 
@@ -668,14 +756,17 @@ function generateDetailedDocs(modules: KSAModuleMeta[]): string {
   }
 
   const categoryNames: Record<string, string> = {
-    system: "System Operations",
-    research: "Research & Information",
-    data: "Data Enrichment",
-    create: "Content Creation",
-    ai: "AI Capabilities",
+    core: "Core KSAs (Always Available)",
+    skills: "Skills KSAs (Research & Data)",
+    deliverables: "Deliverables KSAs (Output Formats)",
   };
 
-  for (const [category, mods] of byCategory) {
+  const categoryOrder: KSACategory[] = ["core", "skills", "deliverables"];
+
+  for (const category of categoryOrder) {
+    const mods = byCategory.get(category);
+    if (!mods || mods.length === 0) continue;
+
     sections.push(`## ${categoryNames[category] || category}\n`);
 
     for (const m of mods) {
@@ -714,24 +805,26 @@ function generateDetailedDocs(modules: KSAModuleMeta[]): string {
 
 const args = process.argv.slice(2);
 const ksaDir = path.resolve(__dirname, "../ksa");
+const convexDir = path.resolve(__dirname, "../../../convex/agent/_generated");
 
 const modules = indexKSAs(ksaDir);
 
 if (args.includes("--json")) {
   console.log(JSON.stringify(modules, null, 2));
-} else if (args.includes("--generate-registry")) {
-  const output = generateKSARegistry(modules);
+} else if (args.includes("--generate")) {
+  const output = generateLakituRegistry(modules);
   const outputPath = path.resolve(ksaDir, "_generated/registry.ts");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output);
-  console.log(`Generated registry at: ${outputPath}`);
+  console.log(`Generated Lakitu registry at: ${outputPath}`);
   console.log(`Found ${modules.length} KSAs with ${modules.reduce((n, m) => n + m.functions.length, 0)} functions`);
-} else if (args.includes("--generate-skills")) {
-  const output = generateSkillsMapping(modules);
-  const outputPath = path.resolve(ksaDir, "_generated/skills.ts");
+} else if (args.includes("--generate-convex")) {
+  const output = generateConvexRegistry(modules);
+  const outputPath = path.resolve(convexDir, "ksaRegistry.ts");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output);
-  console.log(`Generated skills mapping at: ${outputPath}`);
+  console.log(`Generated Convex registry at: ${outputPath}`);
+  console.log(`Found ${modules.length} KSAs with ${modules.reduce((n, m) => n + m.functions.length, 0)} functions`);
 } else if (args.includes("--generate-docs")) {
   const output = generateDetailedDocs(modules);
   const outputPath = path.resolve(ksaDir, "_generated/REFERENCE.md");
@@ -741,36 +834,52 @@ if (args.includes("--json")) {
 } else if (args.includes("--all")) {
   // Generate everything
   fs.mkdirSync(path.resolve(ksaDir, "_generated"), { recursive: true });
+  fs.mkdirSync(convexDir, { recursive: true });
 
-  const registry = generateKSARegistry(modules);
-  fs.writeFileSync(path.resolve(ksaDir, "_generated/registry.ts"), registry);
+  // Lakitu registry
+  const lakituRegistry = generateLakituRegistry(modules);
+  fs.writeFileSync(path.resolve(ksaDir, "_generated/registry.ts"), lakituRegistry);
 
-  const skills = generateSkillsMapping(modules);
-  fs.writeFileSync(path.resolve(ksaDir, "_generated/skills.ts"), skills);
+  // Convex registry
+  const convexRegistry = generateConvexRegistry(modules);
+  fs.writeFileSync(path.resolve(convexDir, "ksaRegistry.ts"), convexRegistry);
 
+  // Documentation
   const docs = generateDetailedDocs(modules);
   fs.writeFileSync(path.resolve(ksaDir, "_generated/REFERENCE.md"), docs);
 
-  console.log("Generated all outputs in ksa/_generated/");
-  console.log(`  - registry.ts (${modules.length} KSAs)`);
-  console.log(`  - skills.ts (base skill mappings)`);
-  console.log(`  - REFERENCE.md (documentation)`);
+  console.log("Generated all outputs:");
+  console.log(`  - packages/lakitu/ksa/_generated/registry.ts (${modules.length} KSAs)`);
+  console.log(`  - convex/agent/_generated/ksaRegistry.ts`);
+  console.log(`  - packages/lakitu/ksa/_generated/REFERENCE.md`);
 } else {
   // Default: print summary
   console.log("KSA Index Summary\n");
   console.log(`Found ${modules.length} KSAs:\n`);
 
+  const byCategory = new Map<KSACategory, KSAModuleMeta[]>();
   for (const m of modules) {
-    console.log(`  ${m.name} (${m.category})`);
-    console.log(`    ${m.description}`);
-    console.log(`    Functions: ${m.functions.map((f) => f.name).join(", ")}`);
+    if (!byCategory.has(m.category)) {
+      byCategory.set(m.category, []);
+    }
+    byCategory.get(m.category)!.push(m);
+  }
+
+  const categoryOrder: KSACategory[] = ["core", "skills", "deliverables"];
+  for (const cat of categoryOrder) {
+    const mods = byCategory.get(cat);
+    if (!mods) continue;
+    console.log(`[${cat.toUpperCase()}]`);
+    for (const m of mods) {
+      console.log(`  ${m.name}: ${m.functions.map((f) => f.name).join(", ")}`);
+    }
     console.log("");
   }
 
   console.log("\nRun with:");
   console.log("  --json              Output raw JSON");
-  console.log("  --generate-registry Generate KSA_REGISTRY");
-  console.log("  --generate-skills   Generate skill mappings");
+  console.log("  --generate          Generate Lakitu registry");
+  console.log("  --generate-convex   Generate Convex registry");
   console.log("  --generate-docs     Generate reference docs");
   console.log("  --all               Generate all outputs");
 }
