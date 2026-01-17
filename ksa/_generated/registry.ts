@@ -3,7 +3,7 @@
  *
  * DO NOT EDIT MANUALLY - run `bun generate:ksa`
  *
- * Generated at: 2026-01-17T17:00:54.840Z
+ * Generated at: 2026-01-17T17:36:27.662Z
  *
  * This file is generated from the source of truth at:
  * packages/lakitu/ksa/*.ts
@@ -98,12 +98,12 @@ export const KSA_REGISTRY: KSAInfo[] = [
   },
   {
     name: "pdf",
-    description: "PDF Skills Functions for generating PDF documents from markdown.",
+    description: "PDF Skills Functions for generating PDF documents from markdown. PDFs are automatically uploaded to cloud storage after generation.",
     category: "deliverables" as const,
     functions: ["generate"],
     importPath: "./ksa/pdf",
-    servicePaths: [],
-    isLocal: true,
+    servicePaths: ["internal.agent.workflows.crudThreads.saveThreadArtifact", "features.kanban.artifacts.saveArtifactWithBackup"],
+    isLocal: false,
   },
   {
     name: "web",
@@ -120,7 +120,7 @@ export const KSA_REGISTRY: KSAInfo[] = [
     category: "core" as const,
     functions: ["setGatewayConfig", "saveArtifact", "readArtifact", "listArtifacts"],
     importPath: "./ksa/artifacts",
-    servicePaths: ["agent.workflows.crudThreads.saveThreadArtifact", "features.kanban.artifacts.saveArtifactWithBackup", "features.kanban.artifacts.getArtifact", "internal.agent.workflows.crudThreads.listThreadArtifactsInternal", "features.kanban.artifacts.listCardArtifacts"],
+    servicePaths: ["internal.agent.workflows.crudThreads.saveThreadArtifact", "features.kanban.artifacts.saveArtifactWithBackup", "features.kanban.artifacts.getArtifact", "internal.agent.workflows.crudThreads.listThreadArtifactsInternal", "features.kanban.artifacts.listCardArtifacts"],
     isLocal: false,
   },
   {

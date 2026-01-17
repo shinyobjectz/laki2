@@ -13,7 +13,9 @@ import {
 } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { createSubagentToolset } from "../tools";
+
+// Legacy tool system removed - subagents now use code execution mode
+// createSubagentToolset is no longer available
 
 // Default model for subagents
 const DEFAULT_MODEL = "google/gemini-3-flash-preview";
@@ -261,180 +263,37 @@ export const spawn = internalAction({
 
 /**
  * Execute subagent task with tool loop
+ * @deprecated Legacy tool system removed - use code execution mode instead
  */
 async function runSubagentLoop(
-  ctx: any,
-  systemPrompt: string,
-  task: string,
-  toolNames: string[],
-  model: string,
-  maxSteps: number = 5
+  _ctx: any,
+  _systemPrompt: string,
+  _task: string,
+  _toolNames: string[],
+  _model: string,
+  _maxSteps: number = 5
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  // Create tools for this subagent
-  const tools = createSubagentToolset(ctx, toolNames);
-  const toolDefs = Object.entries(tools).map(([name, tool]) => ({
-    name,
-    description: (tool as any).description || `Tool: ${name}`,
-    parameters: (tool as any).parameters || { type: "object", properties: {} },
-  }));
-
-  const messages: LLMMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: task },
-  ];
-
-  const allToolCalls: ToolCall[] = [];
-  let finalText = "";
-
-  for (let step = 0; step < maxSteps; step++) {
-    const response = await callCloudLLM(messages, {
-      model,
-      tools: toolDefs.length > 0 ? toolDefs : undefined,
-    });
-
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      finalText = response.text;
-      break;
-    }
-
-    const toolResults: string[] = [];
-    for (const tc of response.toolCalls) {
-      allToolCalls.push(tc);
-
-      try {
-        const tool = tools[tc.toolName];
-        if (!tool) {
-          toolResults.push(`Error: Unknown tool "${tc.toolName}"`);
-          continue;
-        }
-
-        const result = await (tool as any).execute(tc.args, { toolCallId: `${step}-${tc.toolName}` });
-        toolResults.push(typeof result === "string" ? result : JSON.stringify(result));
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        toolResults.push(`Error executing ${tc.toolName}: ${msg}`);
-      }
-    }
-
-    messages.push({
-      role: "assistant",
-      content: response.text || `Called tools: ${response.toolCalls.map((t) => t.toolName).join(", ")}`,
-    });
-
-    messages.push({
-      role: "user",
-      content: `Tool results:\n${toolResults.join("\n\n")}`,
-    });
-
-    if (response.finishReason === "stop") {
-      finalText = response.text;
-      break;
-    }
-  }
-
-  return { text: finalText, toolCalls: allToolCalls };
+  throw new Error(
+    "Legacy subagent tool system is deprecated. Use code execution mode with KSAs instead."
+  );
 }
 
 /**
  * Execute subagent task with tool loop and progress emission
+ * @deprecated Legacy tool system removed - use code execution mode instead
  */
 async function runSubagentLoopWithProgress(
-  ctx: any,
-  systemPrompt: string,
-  task: string,
-  toolNames: string[],
-  model: string,
-  maxSteps: number = 5,
-  onProgress?: (step: ChainOfThoughtStep) => Promise<void>
+  _ctx: any,
+  _systemPrompt: string,
+  _task: string,
+  _toolNames: string[],
+  _model: string,
+  _maxSteps: number = 5,
+  _onProgress?: (step: ChainOfThoughtStep) => Promise<void>
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  // Create tools for this subagent
-  const tools = createSubagentToolset(ctx, toolNames);
-  const toolDefs = Object.entries(tools).map(([name, tool]) => ({
-    name,
-    description: (tool as any).description || `Tool: ${name}`,
-    parameters: (tool as any).parameters || { type: "object", properties: {} },
-  }));
-
-  const messages: LLMMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: task },
-  ];
-
-  const allToolCalls: ToolCall[] = [];
-  let finalText = "";
-  let stepCounter = 0;
-
-  for (let step = 0; step < maxSteps; step++) {
-    // Emit thinking step
-    if (onProgress) {
-      await onProgress({
-        id: `step_${stepCounter++}`,
-        type: "thinking",
-        label: "Analyzing task...",
-        status: "active",
-      });
-    }
-
-    const response = await callCloudLLM(messages, {
-      model,
-      tools: toolDefs.length > 0 ? toolDefs : undefined,
-    });
-
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      finalText = response.text;
-      break;
-    }
-
-    const toolResults: string[] = [];
-    for (const tc of response.toolCalls) {
-      allToolCalls.push(tc);
-
-      // Emit tool step (active)
-      const stepId = `step_${stepCounter++}`;
-      const toolType = getToolType(tc.toolName);
-
-      if (onProgress) {
-        await onProgress({
-          id: stepId,
-          type: toolType,
-          label: `Using ${tc.toolName}`,
-          status: "active",
-          details: JSON.stringify(tc.args).slice(0, 100),
-        });
-      }
-
-      try {
-        const tool = tools[tc.toolName];
-        if (!tool) {
-          toolResults.push(`Error: Unknown tool "${tc.toolName}"`);
-          continue;
-        }
-
-        const result = await (tool as any).execute(tc.args, { toolCallId: `${step}-${tc.toolName}` });
-        toolResults.push(typeof result === "string" ? result : JSON.stringify(result));
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        toolResults.push(`Error executing ${tc.toolName}: ${msg}`);
-      }
-    }
-
-    messages.push({
-      role: "assistant",
-      content: response.text || `Called tools: ${response.toolCalls.map((t) => t.toolName).join(", ")}`,
-    });
-
-    messages.push({
-      role: "user",
-      content: `Tool results:\n${toolResults.join("\n\n")}`,
-    });
-
-    if (response.finishReason === "stop") {
-      finalText = response.text;
-      break;
-    }
-  }
-
-  return { text: finalText, toolCalls: allToolCalls };
+  throw new Error(
+    "Legacy subagent tool system is deprecated. Use code execution mode with KSAs instead."
+  );
 }
 
 /**

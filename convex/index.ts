@@ -39,11 +39,10 @@ export * as context from "./context";
 export * as session from "./context/session";
 
 // ============================================
-// Tools
+// Tools (DEPRECATED - Use KSAs instead)
 // ============================================
-// Note: Actions are internal and use "use node" - they cannot be re-exported
-// from a non-node file. Import them directly: import { internal } from "./_generated/api"
-export * as tools from "./tools";
+// Legacy tool system has been removed. Use the KSA (Knowledge, Skills, Abilities)
+// architecture with code execution mode instead. See packages/lakitu/ksa/
 
 // ============================================
 // Prompts

@@ -14,13 +14,6 @@
 import { action, internalAction, query, mutation } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { v } from "convex/values";
-import { createAllTools } from "../tools";
-import { setGatewayConfig } from "../tools/web";
-import { setArtifactGatewayConfig } from "../tools/artifacts";
-import { setAutomationGatewayConfig } from "../tools/automation";
-import { setPdfGatewayConfig } from "../tools/pdf";
-import { setBoardGatewayConfig } from "../tools/board";
-import { SYSTEM_PROMPT } from "../prompts/system";
 import type { ChainOfThoughtStep, StepStatus } from "../../shared/chain-of-thought";
 import { createStepId, getStepTypeForTool } from "../../shared/chain-of-thought";
 // Note: Zod 4 has native toJSONSchema() - don't need zod-to-json-schema
@@ -311,185 +304,23 @@ function createThreadId(): string {
 }
 
 // ============================================
-// Tool Execution Loop
+// Legacy Tool Execution Loop (DEPRECATED)
 // ============================================
 
 /**
- * Execute a multi-turn agent loop with tool calling.
- * Handles the tool call -> execute -> respond cycle.
+ * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
  */
 async function runAgentLoop(
-  ctx: any,
-  systemPrompt: string,
-  userPrompt: string,
-  maxSteps: number = 10,
-  threadId?: string
+  _ctx: any,
+  _systemPrompt: string,
+  _userPrompt: string,
+  _maxSteps: number = 10,
+  _threadId?: string
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  const tid = threadId || `loop_${Date.now()}`;
-
-  // Build tool definitions for the LLM (convert Zod schemas to JSON schemas)
-  const tools = createAllTools(ctx);
-  console.log(`[lakitu] Available tools: ${Object.keys(tools).join(', ')}`);
-
-  const toolDefs = Object.entries(tools).map(([name, tool]) => {
-    const t = tool as any;
-    let parameters: Record<string, any> = { type: "object", properties: {} };
-
-    // Debug: Log what the tool object looks like
-    if (name === 'bash') {
-      console.log(`[lakitu DEBUG] bash tool object keys: ${Object.keys(t).join(', ')}`);
-      console.log(`[lakitu DEBUG] bash t.parameters type: ${typeof t.parameters}`);
-      if (t.parameters) {
-        console.log(`[lakitu DEBUG] bash t.parameters keys: ${Object.keys(t.parameters).join(', ')}`);
-        console.log(`[lakitu DEBUG] bash t.parameters.toJSONSchema exists: ${typeof t.parameters.toJSONSchema === 'function'}`);
-        console.log(`[lakitu DEBUG] bash t.parameters._def exists: ${!!t.parameters._def}`);
-      }
-    }
-
-    // AI SDK tools have Zod schemas in .parameters - convert to JSON schema
-    // Zod 4 has native toJSONSchema() method
-    if (t.parameters && typeof t.parameters.toJSONSchema === "function") {
-      // Use Zod's native JSON schema conversion
-      const jsonSchema = t.parameters.toJSONSchema();
-      // Remove $schema metadata that OpenAI doesn't want
-      const { $schema, ...cleanSchema } = jsonSchema;
-      parameters = cleanSchema;
-      if (name === 'bash') {
-        console.log(`[lakitu DEBUG] bash JSON schema from toJSONSchema: ${JSON.stringify(parameters)}`);
-      }
-    } else if (t.parameters && typeof t.parameters.parse === "function") {
-      // Older Zod without toJSONSchema - try to extract basic shape
-      console.log(`[lakitu] WARNING: Tool ${name} has Zod schema without toJSONSchema`);
-      parameters = { type: "object", properties: {} };
-    } else if (t.parameters && typeof t.parameters === "object") {
-      // Already a JSON schema object
-      parameters = t.parameters;
-      if (name === 'bash') {
-        console.log(`[lakitu DEBUG] bash using raw parameters object: ${JSON.stringify(parameters)}`);
-      }
-    }
-
-    return {
-      name,
-      description: t.description || `Tool: ${name}`,
-      parameters,
-    };
-  });
-
-  // Log bash tool def specifically
-  const bashToolDef = toolDefs.find(t => t.name === 'bash');
-  if (bashToolDef) {
-    console.log(`[lakitu DEBUG] bash final tool def: ${JSON.stringify(bashToolDef)}`);
-  } else {
-    console.log(`[lakitu] WARNING: bash tool NOT FOUND in tool definitions!`);
-  }
-
-  const messages: LLMMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt },
-  ];
-
-  const allToolCalls: ToolCall[] = [];
-  let finalText = "";
-
-  // Emit initial thinking step
-  emitStep(tid, { type: "thinking", status: "complete", label: "Processing request..." });
-
-  for (let step = 0; step < maxSteps; step++) {
-    const thinkingId = emitStep(tid, { 
-      type: "thinking", 
-      status: "active", 
-      label: `Step ${step + 1}: Analyzing...` 
-    });
-
-    // Call LLM via cloud gateway
-    const response = await callCloudLLM(messages, {
-      tools: toolDefs.length > 0 ? toolDefs : undefined,
-    });
-    
-    updateStepStatus(tid, thinkingId, "complete");
-
-    // If no tool calls, we're done
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      finalText = response.text;
-      if (finalText) {
-        emitStep(tid, { type: "text", status: "complete", label: finalText.slice(0, 200) });
-      }
-      break;
-    }
-
-    // Execute tool calls
-    console.log(`[lakitu] LLM requested ${response.toolCalls.length} tool calls: ${response.toolCalls.map(t => t.toolName).join(', ')}`);
-
-    const toolResults: string[] = [];
-    for (const tc of response.toolCalls) {
-      allToolCalls.push(tc);
-      console.log(`[lakitu] Executing tool: ${tc.toolName} with args: ${JSON.stringify(tc.args).slice(0, 200)}`);
-
-      // Emit tool call as active step
-      const toolStepId = emitStep(tid, createToolStep(tc.toolName, tc.args, null, "active"));
-
-      try {
-        const tool = tools[tc.toolName];
-        if (!tool) {
-          const err = `Error: Unknown tool "${tc.toolName}"`;
-          console.log(`[lakitu] Tool not found: ${tc.toolName}`);
-          toolResults.push(err);
-          updateStepStatus(tid, toolStepId, "error");
-          continue;
-        }
-
-        // Execute the tool
-        console.log(`[lakitu] Calling ${tc.toolName}.execute()...`);
-        const result = await (tool as any).execute(tc.args, { toolCallId: `${step}-${tc.toolName}` });
-        console.log(`[lakitu] ${tc.toolName} returned: ${JSON.stringify(result).slice(0, 200)}`);
-        const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-        toolResults.push(resultStr);
-
-        // Update the step with result and mark complete
-        const steps = chainOfThoughtSteps.get(tid);
-        if (steps) {
-          const idx = steps.findIndex(s => s.id === toolStepId);
-          if (idx >= 0) {
-            // Replace with enriched step containing result data
-            steps[idx] = {
-              id: toolStepId,
-              timestamp: steps[idx].timestamp,
-              ...createToolStep(tc.toolName, tc.args, result, "complete"),
-            } as ChainOfThoughtStep;
-          }
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        const err = `Error executing ${tc.toolName}: ${msg}`;
-        toolResults.push(err);
-        updateStepStatus(tid, toolStepId, "error");
-      }
-    }
-
-    // Add assistant message with tool calls
-    messages.push({
-      role: "assistant",
-      content: response.text || `Called tools: ${response.toolCalls.map((t) => t.toolName).join(", ")}`,
-    });
-
-    // Add tool results as user message
-    messages.push({
-      role: "user",
-      content: `Tool results:\n${toolResults.join("\n\n")}`,
-    });
-
-    // Check if LLM indicated completion
-    if (response.finishReason === "stop") {
-      finalText = response.text;
-      if (finalText) {
-        emitStep(tid, { type: "text", status: "complete", label: finalText.slice(0, 200) });
-      }
-      break;
-    }
-  }
-
-  return { text: finalText, toolCalls: allToolCalls };
+  throw new Error(
+    "Legacy tool calling mode is deprecated. Use startCodeExecThread instead, " +
+    "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
+  );
 }
 
 // ============================================
@@ -498,94 +329,41 @@ async function runAgentLoop(
 
 /**
  * Start a new agent thread
+ * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
  */
 export const startThread = action({
   args: {
     prompt: v.string(),
     context: v.optional(v.any()),
   },
-  handler: async (ctx, args): Promise<AgentResult> => {
-    const threadId = createThreadId();
-
-    // Set gateway config from context if provided
-    const ctxObj = args.context as { gatewayConfig?: GatewayConfig; cardId?: string } | undefined;
-    console.log(`[lakitu agent] Received context: ${JSON.stringify(args.context)}`);
-    console.log(`[lakitu agent] gatewayConfig present: ${!!ctxObj?.gatewayConfig}`);
-    console.log(`[lakitu agent] cardId: ${ctxObj?.cardId || 'not provided'}`);
-    if (ctxObj?.gatewayConfig) {
-      gatewayConfig = ctxObj.gatewayConfig;
-      // Also set gateway config for tools (web, artifacts, etc.)
-      setGatewayConfig(ctxObj.gatewayConfig);
-      // Set artifact gateway config with cardId for cloud sync
-      setArtifactGatewayConfig({
-        ...ctxObj.gatewayConfig,
-        cardId: ctxObj.cardId,
-      });
-      // Set automation gateway config with cardId for cross-stage artifact access
-      setAutomationGatewayConfig({
-        ...ctxObj.gatewayConfig,
-        cardId: ctxObj.cardId,
-      });
-      // Set PDF gateway config for auto-artifact save
-      setPdfGatewayConfig({
-        ...ctxObj.gatewayConfig,
-        cardId: ctxObj.cardId,
-      });
-      // Set board gateway config for workflow management
-      setBoardGatewayConfig({
-        ...ctxObj.gatewayConfig,
-      });
-      console.log(`[lakitu agent] Set gatewayConfig: convexUrl=${gatewayConfig.convexUrl}, jwt length=${gatewayConfig.jwt?.length}`);
-    }
-
-    // Log the decision to start
-    await ctx.runMutation(api.agent.decisions.log, {
-      threadId,
-      task: args.prompt,
-      decisionType: "tool_selection",
-      selectedTools: [],
-      reasoning: "Starting new thread for task",
-      expectedOutcome: "Agent will process the prompt and produce results",
-    });
-
-    // Run the agent loop with threadId for streaming
-    const result = await runAgentLoop(ctx, SYSTEM_PROMPT, args.prompt, 10, threadId);
-
-    return {
-      threadId,
-      text: result.text,
-      toolCalls: result.toolCalls.map((tc) => ({
-        ...tc,
-        result: undefined,
-      })),
-    };
+  handler: async (_ctx, _args): Promise<AgentResult> => {
+    throw new Error(
+      "startThread is deprecated. Use startCodeExecThread instead, " +
+      "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
+    );
   },
 });
 
 /**
  * Continue an existing thread
+ * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
  */
 export const continueThread = action({
   args: {
     threadId: v.string(),
     prompt: v.string(),
   },
-  handler: async (ctx, args): Promise<AgentResult> => {
-    const result = await runAgentLoop(ctx, SYSTEM_PROMPT, args.prompt);
-
-    return {
-      threadId: args.threadId,
-      text: result.text,
-      toolCalls: result.toolCalls.map((tc) => ({
-        ...tc,
-        result: undefined,
-      })),
-    };
+  handler: async (_ctx, _args): Promise<AgentResult> => {
+    throw new Error(
+      "continueThread is deprecated. Use startCodeExecThread instead, " +
+      "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
+    );
   },
 });
 
 /**
  * Run agent with timeout for chained execution
+ * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
  */
 export const runWithTimeout = internalAction({
   args: {
@@ -594,73 +372,11 @@ export const runWithTimeout = internalAction({
     timeoutMs: v.number(),
     checkpointId: v.optional(v.id("checkpoints")),
   },
-  handler: async (ctx, args) => {
-    const startTime = Date.now();
-    const timeout = args.timeoutMs;
-
-    let threadId: string;
-
-    if (args.checkpointId) {
-      const checkpoint = await ctx.runQuery(
-        internal.state.checkpoints.internalGet,
-        { id: args.checkpointId }
-      );
-      if (!checkpoint) {
-        throw new Error(`Checkpoint ${args.checkpointId} not found`);
-      }
-      threadId = checkpoint.threadId;
-
-      await ctx.runMutation(internal.state.files.restoreFromCheckpoint, {
-        checkpointId: args.checkpointId,
-      });
-    } else {
-      threadId = createThreadId();
-    }
-
-    try {
-      const result = await Promise.race([
-        runAgentLoop(ctx, SYSTEM_PROMPT, args.prompt),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("TIMEOUT")), timeout)
-        ),
-      ]);
-
-      return {
-        status: "completed" as const,
-        threadId,
-        text: result.text,
-        toolCalls: result.toolCalls,
-        durationMs: Date.now() - startTime,
-      };
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
-      if (errorMessage === "TIMEOUT") {
-        const checkpointId = await ctx.runMutation(
-          internal.state.checkpoints.createFromCurrentState,
-          {
-            threadId,
-            nextTask: "Continue from where we left off: " + args.prompt,
-            iteration: args.checkpointId
-              ? ((
-                  await ctx.runQuery(internal.state.checkpoints.internalGet, {
-                    id: args.checkpointId,
-                  })
-                )?.iteration ?? 0) + 1
-              : 1,
-          }
-        );
-
-        return {
-          status: "incomplete" as const,
-          threadId,
-          checkpointId,
-          durationMs: Date.now() - startTime,
-        };
-      }
-      throw error;
-    }
+  handler: async (_ctx, _args) => {
+    throw new Error(
+      "runWithTimeout is deprecated. Use startCodeExecThread instead, " +
+      "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
+    );
   },
 });
 

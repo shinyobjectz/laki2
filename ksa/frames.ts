@@ -126,8 +126,9 @@ export async function createFrame(
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<string>(
-    "features.frames.crud.createFrame",
+    "internal.features.frames.internal.createFrameInternal",
     {
       workspaceId,
       name: options.name,
@@ -156,9 +157,10 @@ export async function createFrame(
  */
 export async function getFrame(frameId: string): Promise<Frame | null> {
   try {
+    // Note: userId is injected by gateway from session config
     const response = await callGateway<Frame>(
-      "features.frames.crud.getFrame",
-      { frameId },
+      "internal.features.frames.internal.getFrameInternal",
+      { id: frameId },
       "query"
     );
     return response;
@@ -180,8 +182,9 @@ export async function getFrame(frameId: string): Promise<Frame | null> {
  * }
  */
 export async function listFrames(workspaceId: string): Promise<Frame[]> {
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<Frame[]>(
-    "features.frames.crud.listFrames",
+    "internal.features.frames.internal.listFramesInternal",
     { workspaceId },
     "query"
   );
@@ -212,9 +215,10 @@ export async function updateFrame(
     cssVariables?: Record<string, string>;
   }
 ): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.frames.crud.updateFrame",
-    { frameId, ...updates },
+    "internal.features.frames.internal.updateFrameInternal",
+    { id: frameId, ...updates },
     "mutation"
   );
 }
@@ -228,9 +232,10 @@ export async function updateFrame(
  * await deleteFrame(frameId);
  */
 export async function deleteFrame(frameId: string): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.frames.crud.deleteFrame",
-    { frameId },
+    "internal.features.frames.internal.deleteFrameInternal",
+    { id: frameId },
     "mutation"
   );
 }
@@ -340,8 +345,9 @@ export async function createPage(
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<string>(
-    "features.frames.crud.createPage",
+    "internal.features.frames.internal.createPageInternal",
     {
       workspaceId,
       title: options.title,
@@ -366,9 +372,10 @@ export async function createPage(
  */
 export async function getPage(pageId: string): Promise<Page | null> {
   try {
+    // Note: userId is injected by gateway from session config
     const response = await callGateway<Page>(
-      "features.frames.crud.getPage",
-      { pageId },
+      "internal.features.frames.internal.getPageInternal",
+      { id: pageId },
       "query"
     );
     return response;
@@ -387,8 +394,9 @@ export async function getPage(pageId: string): Promise<Page | null> {
  * const pages = await listPages(workspaceId);
  */
 export async function listPages(workspaceId: string): Promise<Page[]> {
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<Page[]>(
-    "features.frames.crud.listPages",
+    "internal.features.frames.internal.listPagesInternal",
     { workspaceId },
     "query"
   );
@@ -417,9 +425,10 @@ export async function updatePage(
     status?: "draft" | "published" | "archived";
   }
 ): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.frames.crud.updatePage",
-    { pageId, ...updates },
+    "internal.features.frames.internal.updatePageInternal",
+    { id: pageId, ...updates },
     "mutation"
   );
 }
@@ -475,8 +484,9 @@ export async function getAdSpecs(platform?: string): Promise<AdSpec[]> {
  * const versionId = await snapshotFrame(frameId);
  */
 export async function snapshotFrame(frameId: string): Promise<string> {
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<string>(
-    "features.frames.versions.snapshot",
+    "internal.features.frames.internal.snapshotFrameInternal",
     { frameId },
     "mutation"
   );
@@ -492,8 +502,9 @@ export async function snapshotFrame(frameId: string): Promise<string> {
  * await rollbackFrame(versionId);
  */
 export async function rollbackFrame(versionId: string): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.frames.versions.rollback",
+    "internal.features.frames.internal.rollbackFrameInternal",
     { versionId },
     "mutation"
   );

@@ -39,9 +39,13 @@ export * as email from "./email";
 // App-wide KSAs (app services and management)
 export * as boards from "./boards";
 export * as boardDSL from "./boardDSL";
-export * as brandscan from "./brandscan";
+export * as brandLibrary from "./brandLibrary";
 export * as workspaces from "./workspaces";
 export * as frames from "./frames";
+
+// Legacy alias - use 'brandLibrary' instead
+/** @deprecated Use 'brandLibrary' instead */
+export * as brandscan from "./brandLibrary";
 
 // Legacy alias - use 'artifacts' instead
 /** @deprecated Use 'artifacts' instead */

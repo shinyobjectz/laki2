@@ -1,7 +1,7 @@
 # KSA Reference Documentation
 
 > Auto-generated from KSA source files.
-> Generated at: 2026-01-17T17:00:54.841Z
+> Generated at: 2026-01-17T17:36:27.663Z
 
 
 ## Core KSAs (Always Available)
@@ -151,7 +151,7 @@ import { setGatewayConfig, saveArtifact, readArtifact, listArtifacts } from './k
 
 #### `setGatewayConfig()`
 
-Set the gateway config for cloud operations. Called by the runtime when starting a session.
+
 
 **Parameters:**
 
@@ -2758,7 +2758,7 @@ console.log('Technologies:', tech.join(', '));
 
 ### pdf
 
-PDF Skills Functions for generating PDF documents from markdown.
+PDF Skills Functions for generating PDF documents from markdown. PDFs are automatically uploaded to cloud storage after generation.
 
 ```typescript
 import { generate } from './ksa/pdf';
@@ -2766,7 +2766,7 @@ import { generate } from './ksa/pdf';
 
 #### `generate()`
 
-Generate a PDF from markdown content.
+Generate a PDF from markdown content. The PDF is: 1. Generated locally using the generate-pdf CLI 2. Automatically uploaded to cloud storage (thread or card artifacts)
 
 **Parameters:**
 
@@ -2776,12 +2776,15 @@ Generate a PDF from markdown content.
 
 **Example:**
 ```typescript
-await generate({
-  filename: 'my-report',
-  content: '# Report\n\nContent here...',
-  title: 'Quarterly Report'
+const result = await generate({
+  filename: 'competitive-analysis',
+  content: '# Competitive Analysis\n\n## Overview\n...',
+  title: 'Competitive Analysis Report'
 });
-// Creates /home/user/artifacts/my-report.pdf
+
+if (result.success) {
+  console.log(`PDF uploaded: ${result.name} (${result.artifactId})`);
+}
 ```
 
 

@@ -103,8 +103,9 @@ export interface Design {
  * }
  */
 export async function listWorkspaces(orgId?: string): Promise<Workspace[]> {
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<Workspace[]>(
-    "features.workspaces.workspaces.list",
+    "internal.features.workspaces.internal.listInternal",
     { orgId },
     "query"
   );
@@ -122,8 +123,9 @@ export async function listWorkspaces(orgId?: string): Promise<Workspace[]> {
  * const workspaceId = await createWorkspace('Q1 Campaign Designs');
  */
 export async function createWorkspace(name: string, orgId?: string): Promise<string> {
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<string>(
-    "features.workspaces.workspaces.create",
+    "internal.features.workspaces.internal.createInternal",
     { name, orgId },
     "mutation"
   );
@@ -142,9 +144,10 @@ export async function createWorkspace(name: string, orgId?: string): Promise<str
  */
 export async function getWorkspace(workspaceId: string): Promise<Workspace | null> {
   try {
+    // Note: userId is injected by gateway from session config
     const response = await callGateway<Workspace>(
-      "features.workspaces.workspaces.get",
-      { workspaceId },
+      "internal.features.workspaces.internal.getInternal",
+      { id: workspaceId },
       "query"
     );
     return response;
@@ -163,9 +166,10 @@ export async function getWorkspace(workspaceId: string): Promise<Workspace | nul
  * await updateWorkspaceName(workspaceId, 'Rebranded Workspace');
  */
 export async function updateWorkspaceName(workspaceId: string, name: string): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.workspaces.workspaces.updateName",
-    { workspaceId, name },
+    "internal.features.workspaces.internal.updateInternal",
+    { id: workspaceId, name },
     "mutation"
   );
 }
@@ -179,9 +183,10 @@ export async function updateWorkspaceName(workspaceId: string, name: string): Pr
  * await deleteWorkspace(workspaceId);
  */
 export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.workspaces.workspaces.remove",
-    { workspaceId },
+    "internal.features.workspaces.internal.removeInternal",
+    { id: workspaceId },
     "mutation"
   );
 }
@@ -200,8 +205,9 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
  */
 export async function getCanvas(workspaceId: string): Promise<CanvasState | null> {
   try {
+    // Note: userId is injected by gateway from session config
     const response = await callGateway<CanvasState>(
-      "features.workspaces.canvas.get",
+      "internal.features.workspaces.internal.getCanvasInternal",
       { workspaceId },
       "query"
     );
@@ -226,8 +232,9 @@ export async function getCanvas(workspaceId: string): Promise<CanvasState | null
  * });
  */
 export async function saveCanvas(workspaceId: string, canvas: CanvasState): Promise<void> {
+  // Note: userId is injected by gateway from session config
   await callGateway(
-    "features.workspaces.canvas.save",
+    "internal.features.workspaces.internal.saveCanvasInternal",
     { workspaceId, canvas },
     "mutation"
   );
@@ -377,8 +384,9 @@ export async function addConnection(
  * const designs = await listDesigns(workspaceId);
  */
 export async function listDesigns(workspaceId: string): Promise<Design[]> {
+  // Note: userId is injected by gateway from session config
   const response = await callGateway<Design[]>(
-    "features.workspaces.designs.listDesigns",
+    "internal.features.workspaces.internal.listDesignsInternal",
     { workspaceId },
     "query"
   );
@@ -404,9 +412,16 @@ export async function saveDesign(
   workspaceId: string,
   design: Omit<Design, "_id" | "_creationTime" | "workspaceId">
 ): Promise<string> {
+  // Note: userId is injected by gateway from session config
+  // Map the design data to the internal endpoint format
   const response = await callGateway<string>(
-    "features.workspaces.designs.saveDesign",
-    { workspaceId, ...design },
+    "internal.features.workspaces.internal.saveDesignInternal",
+    {
+      workspaceId,
+      name: design.name,
+      pageType: "canvas" as const, // Designs are stored as canvas type
+      content: { elements: design.elements, status: design.status },
+    },
     "mutation"
   );
   return response;

@@ -1,15 +1,18 @@
 /**
- * Brand Lookup KSA - Knowledge, Skills, and Abilities
+ * Brand Library KSA - Knowledge, Skills, and Abilities
  *
- * Lightweight brand lookups for AI agents.
- * Uses existing brand library data or fast API lookups.
+ * Read-only access to the brand library for AI agents.
+ * Provides brand lookups, search, and library data retrieval.
  *
  * IMPORTANT: This KSA does NOT trigger full brand scans.
  * Full scans involve web crawling and can take minutes.
  * For agent tasks, use these lightweight lookups instead.
  *
+ * For company firmographic data (employees, revenue, etc.),
+ * use the `companies` KSA which wraps TheCompaniesAPI.
+ *
  * @example
- * import { lookupBrand, searchBrands, getBrandByDomain } from './ksa/brandscan';
+ * import { lookupBrand, searchBrands, getBrandByDomain } from './ksa/brandLibrary';
  *
  * // Quick lookup - checks library first, then lightweight API
  * const brand = await lookupBrand('anthropic.com');
