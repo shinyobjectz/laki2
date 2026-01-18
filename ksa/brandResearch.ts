@@ -1423,3 +1423,329 @@ export async function fullResearch(
     throw e;
   }
 }
+
+// ============================================================================
+// Social Discovery (Intelligent Gap Detection)
+// ============================================================================
+
+export interface BrandDataStatus {
+  brandId: string;
+  domain: string;
+  name: string;
+  hasSocials: {
+    theCompanies: boolean;
+    whatCMS: boolean;
+    brandDev: boolean;
+  };
+  verifiedSocials: {
+    twitter?: string;
+    instagram?: string;
+    facebook?: string;
+    youtube?: string;
+    tiktok?: string;
+    linkedin?: string;
+  };
+  entityCounts: {
+    products: number;
+    assets: number;
+    ads: number;
+    socialPosts: number;  // Owned content (not Reddit)
+    mentions: number;     // Reddit mentions
+  };
+  gaps: string[];  // What's missing
+}
+
+export interface SocialDiscoveryResult {
+  youtube: { channel: any; videos: number; shorts: number };
+  instagram: { profile: any; posts: number };
+  tiktok: { profile: any; videos: number };
+  twitter: { profile: any; tweets: number };
+  facebook: { profile: any; posts: number };
+  linkedin: { company: any; posts: number };
+  reddit: { posts: number; comments: number };
+  errors: string[];
+}
+
+/**
+ * Get brand data status including what's available and what's missing.
+ * Queries cloud Convex to check products, social URLs, and social posts.
+ *
+ * @param brandId - Brand ID in cloud database
+ * @returns Brand data status with gaps identified
+ *
+ * @example
+ * const status = await getBrandDataStatus("brand_123");
+ * console.log(`Gaps: ${status.gaps.join(", ")}`);
+ * if (status.gaps.includes("socialPosts")) {
+ *   await discoverSocialContent("brand_123", status.verifiedSocials);
+ * }
+ */
+export async function getBrandDataStatus(brandId: string): Promise<BrandDataStatus> {
+  // Query brand data from cloud
+  const brandData = await callGateway("features.brands.core.crud.get", {
+    id: brandId,
+  });
+
+  if (!brandData) {
+    throw new Error(`Brand not found: ${brandId}`);
+  }
+
+  const brand = brandData as any;
+
+  // Extract social URLs from all sources
+  const companySocials = brand.companyDetails?.socials || {};
+  const styleguideArray = brand.styleguide?.socials || [];
+  const whatCMSSocials = brand.companyDetails?.whatCMS?.socialProfiles || [];
+
+  // Build styleguide map (Brand.dev format: [{ type: "twitter", url: "..." }])
+  const styleguideMap: Record<string, string> = {};
+  for (const s of styleguideArray) {
+    if (s.type && s.url) {
+      const key = s.type === 'x' ? 'twitter' : s.type;
+      styleguideMap[key] = s.url;
+    }
+  }
+
+  // Build WhatCMS map
+  const whatCMSMap: Record<string, string> = {};
+  for (const s of whatCMSSocials) {
+    if (s.network && s.url) {
+      whatCMSMap[s.network] = s.url;
+    }
+  }
+
+  // Merge: TheCompanies > WhatCMS > Brand.dev
+  const verifiedSocials: BrandDataStatus["verifiedSocials"] = {
+    twitter: companySocials.twitter?.url || whatCMSMap.twitter || styleguideMap.twitter,
+    instagram: companySocials.instagram?.url || whatCMSMap.instagram || styleguideMap.instagram,
+    facebook: companySocials.facebook?.url || whatCMSMap.facebook || styleguideMap.facebook,
+    youtube: companySocials.youtube?.url || whatCMSMap.youtube || styleguideMap.youtube,
+    tiktok: companySocials.tiktok?.url || whatCMSMap.tiktok || styleguideMap.tiktok,
+    linkedin: companySocials.linkedin?.url || whatCMSMap.linkedin || styleguideMap.linkedin,
+  };
+
+  // Get entity counts
+  const entityCounts = await callGateway("features.brands.core.products.getBrandEntityCounts", {
+    brandId,
+  }) as BrandDataStatus["entityCounts"];
+
+  // Identify gaps
+  const gaps: string[] = [];
+
+  if (entityCounts.products === 0) {
+    gaps.push("products");
+  }
+
+  // Check if we have social URLs but no social posts
+  const hasVerifiedSocials = Object.values(verifiedSocials).some(url => !!url);
+  if (hasVerifiedSocials && entityCounts.socialPosts === 0) {
+    gaps.push("socialPosts");
+  }
+
+  // Check for missing company details
+  if (!brand.companyDetails?.name) {
+    gaps.push("companyDetails");
+  }
+
+  return {
+    brandId,
+    domain: brand.domain,
+    name: brand.name,
+    hasSocials: {
+      theCompanies: Object.values(companySocials).some((s: any) => s?.url),
+      whatCMS: whatCMSSocials.length > 0,
+      brandDev: styleguideArray.length > 0,
+    },
+    verifiedSocials,
+    entityCounts,
+    gaps,
+  };
+}
+
+/**
+ * Discover and store social content for a brand.
+ * Triggers the cloud social discovery action with verified URLs.
+ *
+ * @param brandId - Brand ID in cloud database
+ * @param verifiedSocials - Verified social URLs to use
+ * @returns Discovery results
+ *
+ * @example
+ * const status = await getBrandDataStatus("brand_123");
+ * if (status.gaps.includes("socialPosts")) {
+ *   const result = await discoverSocialContent("brand_123", status.verifiedSocials);
+ *   console.log(`Found ${result.instagram.posts} Instagram posts`);
+ * }
+ */
+export async function discoverSocialContent(
+  brandId: string,
+  verifiedSocials: BrandDataStatus["verifiedSocials"]
+): Promise<SocialDiscoveryResult> {
+  // Get brand info for the action
+  const brandData = await callGateway("features.brands.core.crud.get", {
+    id: brandId,
+  });
+
+  if (!brandData) {
+    throw new Error(`Brand not found: ${brandId}`);
+  }
+
+  const brand = brandData as any;
+
+  console.log(`[BrandResearch] Discovering social content for ${brand.name}...`);
+  console.log(`  Verified URLs: ${Object.entries(verifiedSocials).filter(([_, v]) => v).map(([k]) => k).join(", ") || "none"}`);
+
+  // Call the cloud social discovery action
+  const result = await callGateway("features.brands.ads.adApis.discoverOrganicSocial", {
+    brandId,
+    brandName: brand.name,
+    domain: brand.domain,
+    maxPostsPerPlatform: 10,
+    verifiedSocials,
+  }) as SocialDiscoveryResult;
+
+  // Log results
+  const totalPosts =
+    (result.instagram?.posts || 0) +
+    (result.twitter?.tweets || 0) +
+    (result.facebook?.posts || 0) +
+    (result.youtube?.videos || 0) + (result.youtube?.shorts || 0) +
+    (result.tiktok?.videos || 0) +
+    (result.linkedin?.posts || 0);
+
+  console.log(`[BrandResearch] Social discovery complete:`);
+  console.log(`  Instagram: ${result.instagram?.posts || 0} posts`);
+  console.log(`  Twitter: ${result.twitter?.tweets || 0} tweets`);
+  console.log(`  Facebook: ${result.facebook?.posts || 0} posts`);
+  console.log(`  YouTube: ${(result.youtube?.videos || 0) + (result.youtube?.shorts || 0)} videos`);
+  console.log(`  TikTok: ${result.tiktok?.videos || 0} videos`);
+  console.log(`  LinkedIn: ${result.linkedin?.posts || 0} posts`);
+  console.log(`  Reddit: ${result.reddit?.posts || 0} mentions`);
+  console.log(`  Total: ${totalPosts} owned posts`);
+
+  if (result.errors?.length > 0) {
+    console.log(`  Errors: ${result.errors.join(", ")}`);
+  }
+
+  return result;
+}
+
+/**
+ * Check brand data and fill any gaps automatically.
+ * This is the main intelligent function that:
+ * 1. Checks what data exists
+ * 2. Identifies gaps
+ * 3. Fills gaps by running appropriate actions
+ *
+ * @param brandId - Brand ID in cloud database
+ * @param options - Options for gap filling
+ * @returns Status and results of gap filling
+ *
+ * @example
+ * // Run full gap analysis and filling
+ * const result = await checkAndFillGaps("brand_123");
+ * console.log(`Filled gaps: ${result.filledGaps.join(", ")}`);
+ *
+ * // Only fill social gaps
+ * const result = await checkAndFillGaps("brand_123", { onlyGaps: ["socialPosts"] });
+ */
+export async function checkAndFillGaps(
+  brandId: string,
+  options?: {
+    onlyGaps?: string[];
+    skipGaps?: string[];
+  }
+): Promise<{
+  status: BrandDataStatus;
+  filledGaps: string[];
+  socialResult?: SocialDiscoveryResult;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  const filledGaps: string[] = [];
+  let socialResult: SocialDiscoveryResult | undefined;
+
+  // Get current status
+  const status = await getBrandDataStatus(brandId);
+
+  console.log(`[BrandResearch] Checking gaps for ${status.name} (${status.domain}):`);
+  console.log(`  Products: ${status.entityCounts.products}`);
+  console.log(`  Social posts: ${status.entityCounts.socialPosts}`);
+  console.log(`  Mentions: ${status.entityCounts.mentions}`);
+  console.log(`  Gaps: ${status.gaps.join(", ") || "none"}`);
+
+  // Filter gaps based on options
+  let gapsToFill = status.gaps;
+  if (options?.onlyGaps) {
+    gapsToFill = gapsToFill.filter(g => options.onlyGaps!.includes(g));
+  }
+  if (options?.skipGaps) {
+    gapsToFill = gapsToFill.filter(g => !options.skipGaps!.includes(g));
+  }
+
+  // Fill social posts gap
+  if (gapsToFill.includes("socialPosts")) {
+    try {
+      socialResult = await discoverSocialContent(brandId, status.verifiedSocials);
+      const totalPosts =
+        (socialResult.instagram?.posts || 0) +
+        (socialResult.twitter?.tweets || 0) +
+        (socialResult.facebook?.posts || 0) +
+        (socialResult.youtube?.videos || 0) + (socialResult.youtube?.shorts || 0) +
+        (socialResult.tiktok?.videos || 0) +
+        (socialResult.linkedin?.posts || 0);
+
+      if (totalPosts > 0) {
+        filledGaps.push("socialPosts");
+      }
+
+      if (socialResult.errors?.length > 0) {
+        errors.push(...socialResult.errors);
+      }
+    } catch (e: any) {
+      errors.push(`Social discovery failed: ${e.message}`);
+    }
+  }
+
+  // Note: Product gap filling would be handled by fullResearch()
+  // This function focuses on supplementary data like social posts
+
+  console.log(`[BrandResearch] Gap filling complete:`);
+  console.log(`  Filled: ${filledGaps.join(", ") || "none"}`);
+  if (errors.length > 0) {
+    console.log(`  Errors: ${errors.join("; ")}`);
+  }
+
+  return {
+    status,
+    filledGaps,
+    socialResult,
+    errors,
+  };
+}
+
+/**
+ * Get WhatCMS social profiles for a domain.
+ * Uses WhatCMS API to find social media accounts linked to a website.
+ *
+ * @param domain - Domain to check
+ * @returns Social profiles found by WhatCMS
+ *
+ * @example
+ * const profiles = await getWhatCMSSocials("example.com");
+ * console.log(profiles); // [{ network: "twitter", url: "...", profile: "..." }]
+ */
+export async function getWhatCMSSocials(domain: string): Promise<Array<{
+  network: string;
+  url: string;
+  profile: string;
+}>> {
+  const url = domain.startsWith("http") ? domain : `https://${domain}`;
+
+  const result = await callGateway("services.WhatCMS.internal.detectTechnology", {
+    url,
+    private: true,
+  }) as any;
+
+  return result?.meta?.social || [];
+}
