@@ -186,33 +186,39 @@ export async function createFrame(
       );
       console.log(`[createFrame] Current canvas:`, currentCanvas ? "exists" : "empty");
 
+      // Canvas format matches @workspaces/core types:
+      // - elements (not nodes)
+      // - connections (not edges)
+      // - viewport.offset (not translation)
+      // - Element.size: {x, y} (not data.width/height)
       const canvas = currentCanvas || {
         version: "1.0",
-        nodes: [],
-        edges: [],
-        markers: [],
-        zoom: 1,
-        translation: { x: 0, y: 0 },
+        elements: [],
+        connections: [],
+        viewport: {
+          offset: { x: 0, y: 0 },
+          zoom: 1,
+        },
+        settings: {},
       };
 
       // Calculate position for new frame (stack below existing frames)
-      const existingNodes = canvas.nodes || [];
-      const maxY = existingNodes.reduce((max: number, node: any) => {
-        const nodeBottom = (node.position?.y || 0) + (node.data?.height || 600);
-        return Math.max(max, nodeBottom);
+      const existingElements = canvas.elements || [];
+      const maxY = existingElements.reduce((max: number, el: any) => {
+        const elBottom = (el.position?.y || 0) + (el.size?.y || 600);
+        return Math.max(max, elBottom);
       }, 0);
 
-      // Add frame as canvas node
-      canvas.nodes = [
-        ...existingNodes,
+      // Add frame as canvas element
+      canvas.elements = [
+        ...existingElements,
         {
           id: frameId,
           position: { x: 100, y: maxY + 50 },
-          type: "frame",
+          size: { x: dimensions.width, y: dimensions.height },
+          container: true, // Frames are containers
           data: {
-            name: options.name,
-            width: dimensions.width,
-            height: dimensions.height,
+            label: options.name,
             code: options.code,
             codeType,
             frameId,
@@ -221,7 +227,7 @@ export async function createFrame(
       ];
 
       // Save updated canvas
-      console.log(`[createFrame] Saving canvas with ${canvas.nodes.length} nodes`);
+      console.log(`[createFrame] Saving canvas with ${canvas.elements.length} elements`);
       await callGateway<void>(
         "internal.features.workspaces.internal.saveCanvasInternal",
         { workspaceId, canvas },
