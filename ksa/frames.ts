@@ -121,28 +121,64 @@ export async function createFrame(
     cssVariables?: Record<string, string>;
   }
 ): Promise<string> {
+  // Validation with clear errors
+  if (!workspaceId) {
+    throw new Error("createFrame: workspaceId is required");
+  }
+  if (!options) {
+    throw new Error("createFrame: options object is required");
+  }
+  if (!options.name) {
+    throw new Error("createFrame: options.name is required");
+  }
+  if (!options.code) {
+    throw new Error("createFrame: options.code is required");
+  }
+
+  // Validate dimensions if provided
+  const dimensions = options.dimensions || { width: 800, height: 600 };
+  if (typeof dimensions.width !== "number" || typeof dimensions.height !== "number") {
+    throw new Error("createFrame: dimensions must have numeric width and height");
+  }
+
+  // Validate codeType
+  const validCodeTypes = ["html", "svelte", "htmx", "tailwind"];
+  const codeType = options.codeType || "tailwind";
+  if (!validCodeTypes.includes(codeType)) {
+    throw new Error(`createFrame: codeType must be one of ${validCodeTypes.join(", ")}`);
+  }
+
   const slug = options.name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+  // Build args, excluding undefined optional fields to avoid Convex validation issues
+  const args: Record<string, unknown> = {
+    workspaceId,
+    name: options.name,
+    slug,
+    code: options.code,
+    codeType,
+    dimensions,
+  };
+  if (options.adMeta !== undefined) args.adMeta = options.adMeta;
+  if (options.sectionMeta !== undefined) args.sectionMeta = options.sectionMeta;
+  if (options.cssVariables !== undefined) args.cssVariables = options.cssVariables;
+
   // Note: userId is injected by gateway from session config
-  const response = await callGateway<string>(
-    "internal.features.frames.internal.createFrameInternal",
-    {
-      workspaceId,
-      name: options.name,
-      slug,
-      code: options.code,
-      codeType: options.codeType || "tailwind",
-      dimensions: options.dimensions || { width: 800, height: 600 },
-      adMeta: options.adMeta,
-      sectionMeta: options.sectionMeta,
-      cssVariables: options.cssVariables,
-    },
-    "mutation"
-  );
-  return response;
+  try {
+    const response = await callGateway<string>(
+      "internal.features.frames.internal.createFrameInternal",
+      args,
+      "mutation"
+    );
+    return response;
+  } catch (error) {
+    throw new Error(
+      `createFrame failed for workspace ${workspaceId}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 }
 
 /**
