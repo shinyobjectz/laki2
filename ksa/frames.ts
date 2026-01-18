@@ -19,7 +19,7 @@
  * const generatedId = await generateFrame(workspaceId, 'A modern hero section with gradient background');
  */
 
-import { callGateway } from "./_shared/gateway";
+import { callGateway, callGatewayBatch } from "./_shared/gateway";
 
 // ============================================================================
 // Types
@@ -168,12 +168,73 @@ export async function createFrame(
 
   // Note: userId is injected by gateway from session config
   try {
-    const response = await callGateway<string>(
+    const frameId = await callGateway<string>(
       "internal.features.frames.internal.createFrameInternal",
       args,
       "mutation"
     );
-    return response;
+
+    // Also add the frame to the workspace canvas so it's visible
+    try {
+      console.log(`[createFrame] Adding frame ${frameId} to canvas for workspace ${workspaceId}`);
+
+      // Get current canvas
+      const currentCanvas = await callGateway<any>(
+        "internal.features.workspaces.internal.getCanvasInternal",
+        { workspaceId },
+        "query"
+      );
+      console.log(`[createFrame] Current canvas:`, currentCanvas ? "exists" : "empty");
+
+      const canvas = currentCanvas || {
+        version: "1.0",
+        nodes: [],
+        edges: [],
+        markers: [],
+        zoom: 1,
+        translation: { x: 0, y: 0 },
+      };
+
+      // Calculate position for new frame (stack below existing frames)
+      const existingNodes = canvas.nodes || [];
+      const maxY = existingNodes.reduce((max: number, node: any) => {
+        const nodeBottom = (node.position?.y || 0) + (node.data?.height || 600);
+        return Math.max(max, nodeBottom);
+      }, 0);
+
+      // Add frame as canvas node
+      canvas.nodes = [
+        ...existingNodes,
+        {
+          id: frameId,
+          position: { x: 100, y: maxY + 50 },
+          type: "frame",
+          data: {
+            name: options.name,
+            width: dimensions.width,
+            height: dimensions.height,
+            code: options.code,
+            codeType,
+            frameId,
+          },
+        },
+      ];
+
+      // Save updated canvas
+      console.log(`[createFrame] Saving canvas with ${canvas.nodes.length} nodes`);
+      await callGateway<void>(
+        "internal.features.workspaces.internal.saveCanvasInternal",
+        { workspaceId, canvas },
+        "mutation"
+      );
+      console.log(`[createFrame] Canvas saved successfully`);
+    } catch (canvasError) {
+      // Log the error - canvas update failed but frame was created
+      console.error(`[createFrame] Canvas update failed: ${canvasError instanceof Error ? canvasError.message : String(canvasError)}`);
+      // Don't throw - frame creation succeeded, canvas update is secondary
+    }
+
+    return frameId;
   } catch (error) {
     throw new Error(
       `createFrame failed for workspace ${workspaceId}: ${error instanceof Error ? error.message : String(error)}`
