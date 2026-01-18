@@ -40,6 +40,7 @@ export * as email from "./email";
 export * as boards from "./boards";
 export * as boardDSL from "./boardDSL";
 export * as brandLibrary from "./brandLibrary";
+export * as brandResearch from "./brandResearch";
 export * as workspaces from "./workspaces";
 export * as frames from "./frames";
 

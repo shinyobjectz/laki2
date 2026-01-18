@@ -368,6 +368,114 @@ export default defineSchema({
     .index("by_status", ["status"]),
 
   // ============================================
+  // Brand Research - Discovered brand data
+  // ============================================
+
+  discoveredSites: defineTable({
+    domain: v.string(),
+    siteType: v.union(
+      v.literal("ecommerce"),
+      v.literal("saas"),
+      v.literal("service"),
+      v.literal("restaurant"),
+      v.literal("media"),
+      v.literal("other")
+    ),
+    platform: v.optional(v.string()),
+    confidence: v.number(),
+
+    // Navigation hints for product discovery
+    navigation: v.array(v.object({
+      label: v.string(),
+      selector: v.optional(v.string()),
+      url: v.optional(v.string()),
+      purpose: v.string(),
+    })),
+
+    // Analysis results
+    observations: v.array(v.string()),
+    productLocations: v.array(v.string()),
+
+    // Metadata
+    screenshotPath: v.optional(v.string()),
+    analyzedAt: v.number(),
+    threadId: v.optional(v.string()),
+  })
+    .index("by_domain", ["domain"])
+    .index("by_thread", ["threadId"]),
+
+  discoveredProducts: defineTable({
+    // Source info
+    domain: v.string(),
+    sourceUrl: v.string(),
+
+    // Product data
+    name: v.string(),
+    type: v.union(
+      v.literal("physical"),
+      v.literal("saas"),
+      v.literal("service")
+    ),
+    price: v.optional(v.number()),
+    currency: v.optional(v.string()),
+    description: v.optional(v.string()),
+    images: v.array(v.string()),
+    category: v.optional(v.string()),
+
+    // Variants
+    variants: v.optional(v.array(v.object({
+      name: v.string(),
+      price: v.optional(v.number()),
+      sku: v.optional(v.string()),
+      available: v.optional(v.boolean()),
+    }))),
+
+    // Verification
+    verified: v.boolean(),
+    verificationNotes: v.optional(v.string()),
+
+    // Metadata
+    extractedAt: v.number(),
+    threadId: v.optional(v.string()),
+
+    // Sync status
+    syncedToCloud: v.boolean(),
+    cloudProductId: v.optional(v.string()),
+  })
+    .index("by_domain", ["domain"])
+    .index("by_thread", ["threadId"])
+    .index("by_synced", ["syncedToCloud"]),
+
+  discoveredUrls: defineTable({
+    domain: v.string(),
+    url: v.string(),
+
+    // Classification
+    urlType: v.union(
+      v.literal("product"),
+      v.literal("listing"),
+      v.literal("pricing"),
+      v.literal("other"),
+      v.literal("skip")
+    ),
+    confidence: v.number(),
+
+    // Scrape status
+    scraped: v.boolean(),
+    scrapedAt: v.optional(v.number()),
+    productCount: v.optional(v.number()),
+    error: v.optional(v.string()),
+
+    // Metadata
+    discoveredAt: v.number(),
+    threadId: v.optional(v.string()),
+  })
+    .index("by_domain", ["domain"])
+    .index("by_type", ["urlType"])
+    .index("by_scraped", ["scraped"])
+    .index("by_thread", ["threadId"]),
+
+  // ============================================
   // Sync Queue - Items to sync to cloud
   // ============================================
 
