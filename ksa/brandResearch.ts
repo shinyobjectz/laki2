@@ -140,7 +140,465 @@ export interface NavigationHint {
   label: string;
   selector?: string;
   url?: string;
-  purpose: "products" | "collections" | "pricing" | "menu" | "other";
+  purpose: "products" | "collections" | "pricing" | "menu" | "platform" | "features" | "integrations" | "services" | "other";
+}
+
+// ============================================================================
+// SaaS URL Discovery Patterns
+// For discovering platform, pricing, features, integrations, and services pages
+// ============================================================================
+
+/**
+ * SaaS-specific URL patterns for multi-page extraction
+ */
+const SAAS_URL_PATTERNS = [
+  // Platform/Overview
+  { pattern: /\/platform\/?$/i, type: 'platform', priority: 1 },
+  { pattern: /\/product\/?$/i, type: 'products', priority: 1 },
+  { pattern: /\/products?\/?$/i, type: 'products', priority: 1 },
+  { pattern: /\/overview\/?$/i, type: 'platform', priority: 2 },
+
+  // Pricing
+  { pattern: /\/pricing\/?$/i, type: 'pricing', priority: 1 },
+  { pattern: /\/plans\/?$/i, type: 'pricing', priority: 2 },
+  { pattern: /\/editions\/?$/i, type: 'pricing', priority: 2 },
+  { pattern: /\/packages\/?$/i, type: 'pricing', priority: 3 },
+
+  // Features
+  { pattern: /\/features?\/?$/i, type: 'features', priority: 1 },
+  { pattern: /\/capabilities\/?$/i, type: 'features', priority: 2 },
+  { pattern: /\/solutions?\/?$/i, type: 'features', priority: 3 },
+  { pattern: /\/what-we-do\/?$/i, type: 'features', priority: 3 },
+
+  // Integrations
+  { pattern: /\/integrations?\/?$/i, type: 'integrations', priority: 1 },
+  { pattern: /\/marketplace\/?$/i, type: 'integrations', priority: 1 },
+  { pattern: /\/exchange\/?$/i, type: 'integrations', priority: 2 },
+  { pattern: /\/apps?\/?$/i, type: 'integrations', priority: 2 },
+  { pattern: /\/partners?\/?$/i, type: 'integrations', priority: 3 },
+
+  // Services
+  { pattern: /\/services?\/?$/i, type: 'services', priority: 1 },
+  { pattern: /\/professional-services?\/?$/i, type: 'services', priority: 1 },
+  { pattern: /\/implementation\/?$/i, type: 'services', priority: 2 },
+  { pattern: /\/support\/?$/i, type: 'services', priority: 3 },
+  { pattern: /\/training\/?$/i, type: 'services', priority: 2 },
+
+  // Legal/Product Descriptions (often has comprehensive product info)
+  { pattern: /\/legal\/product-descriptions?\/?$/i, type: 'legal', priority: 1 },
+
+  // API/Developer
+  { pattern: /\/developer\/?$/i, type: 'developer', priority: 2 },
+  { pattern: /\/api\/?$/i, type: 'developer', priority: 2 },
+  { pattern: /\/docs?\/?$/i, type: 'developer', priority: 3 },
+];
+
+/**
+ * Classify a URL based on SaaS patterns.
+ *
+ * @param url - URL to classify
+ * @returns Classification with type and priority, or null if not SaaS-related
+ *
+ * @example
+ * const classification = classifySaaSUrl("https://example.com/pricing");
+ * console.log(classification); // { type: 'pricing', priority: 1 }
+ */
+export function classifySaaSUrl(url: string): { type: string; priority: number } | null {
+  try {
+    const pathname = new URL(url).pathname;
+    for (const { pattern, type, priority } of SAAS_URL_PATTERNS) {
+      if (pattern.test(pathname)) {
+        return { type, priority };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Discover SaaS-relevant URLs from a domain.
+ * Useful for multi-page extraction of platform, pricing, features, integrations.
+ *
+ * @param domain - Domain to explore
+ * @param existingUrls - URLs already discovered (for deduplication)
+ * @returns Array of classified URLs sorted by priority
+ *
+ * @example
+ * const urls = await discoverSaaSUrls("seismic.com");
+ * console.log(urls);
+ * // [
+ * //   { url: 'https://seismic.com/platform', type: 'platform', priority: 1 },
+ * //   { url: 'https://seismic.com/pricing', type: 'pricing', priority: 1 },
+ * //   { url: 'https://seismic.com/integrations', type: 'integrations', priority: 1 },
+ * // ]
+ */
+export async function discoverSaaSUrls(
+  domain: string,
+  existingUrls: string[] = []
+): Promise<Array<{ url: string; type: string; priority: number }>> {
+  const baseUrl = domain.startsWith("http") ? domain : `https://${domain}`;
+  const cleanDomain = new URL(baseUrl).hostname.replace("www.", "");
+
+  console.log(`[BrandResearch] Discovering SaaS URLs for ${cleanDomain}...`);
+
+  const classifiedUrls: Array<{ url: string; type: string; priority: number }> = [];
+  const seenTypes = new Set<string>();
+  const existingUrlsSet = new Set(existingUrls.map(u => u.toLowerCase()));
+
+  // Classify existing URLs first
+  for (const url of existingUrls) {
+    const classification = classifySaaSUrl(url);
+    if (classification && !seenTypes.has(classification.type)) {
+      classifiedUrls.push({ url, ...classification });
+      seenTypes.add(classification.type);
+    }
+  }
+
+  // Try common SaaS paths that might not be linked
+  const commonPaths = [
+    { path: '/pricing', type: 'pricing', priority: 1 },
+    { path: '/features', type: 'features', priority: 1 },
+    { path: '/integrations', type: 'integrations', priority: 1 },
+    { path: '/platform', type: 'platform', priority: 1 },
+    { path: '/solutions', type: 'features', priority: 2 },
+    { path: '/services', type: 'services', priority: 1 },
+    { path: '/marketplace', type: 'integrations', priority: 1 },
+    { path: '/apps', type: 'integrations', priority: 2 },
+    { path: '/legal/product-descriptions', type: 'legal', priority: 1 },
+  ];
+
+  for (const { path, type, priority } of commonPaths) {
+    if (seenTypes.has(type)) continue;
+
+    const fullUrl = `${baseUrl.replace(/\/$/, '')}${path}`;
+    if (existingUrlsSet.has(fullUrl.toLowerCase())) continue;
+
+    // Check if the URL exists by trying to scrape it
+    try {
+      const content = await scrapeWithScrapeDo(fullUrl, { scrollCount: 1 });
+      if (content.markdown && content.markdown.length > 500) {
+        classifiedUrls.push({ url: fullUrl, type, priority });
+        seenTypes.add(type);
+        console.log(`[BrandResearch] Found SaaS page: ${path}`);
+      }
+    } catch {
+      // URL doesn't exist or failed to load
+    }
+  }
+
+  // Sort by priority
+  classifiedUrls.sort((a, b) => a.priority - b.priority);
+
+  console.log(`[BrandResearch] Discovered ${classifiedUrls.length} SaaS-relevant URLs:`,
+    classifiedUrls.map(u => u.type).join(', '));
+
+  return classifiedUrls;
+}
+
+export interface SaaSExtractionResult {
+  platformInfo?: {
+    platformName?: string;
+    pillars?: string[];
+    isUnifiedPlatform?: boolean;
+  };
+  products: Array<{
+    name: string;
+    type: string;
+    description?: string;
+    primaryFunction?: string;
+    keyFeatures?: string[];
+  }>;
+  editions: Array<{
+    name: string;
+    displayName?: string;
+    price?: number;
+    billingPeriod?: string;
+    priceType?: string;
+    isPopular?: boolean;
+    keyFeatures?: string[];
+  }>;
+  features: Array<{
+    name: string;
+    description?: string;
+    category?: string;
+    status: string;
+    includedIn?: string[];
+  }>;
+  integrations: Array<{
+    name: string;
+    category?: string;
+    type?: string;
+    description?: string;
+  }>;
+  services: Array<{
+    type: string;
+    name: string;
+    description?: string;
+    pricing?: string;
+    duration?: string;
+  }>;
+  aiCapabilities: Array<{
+    name: string;
+    type?: string;
+    description?: string;
+    status?: string;
+  }>;
+}
+
+/**
+ * Extract rich SaaS data from a page using LLM.
+ *
+ * @param content - Page content (markdown)
+ * @param url - Page URL
+ * @param pageType - Type of page (platform, pricing, features, etc.)
+ * @returns Extracted SaaS data
+ *
+ * @example
+ * const content = await scrapeWithScrapeDo("https://example.com/pricing");
+ * const data = await extractSaaSData(content.markdown, content.url, "pricing");
+ * console.log(data.editions); // Pricing tiers
+ */
+export async function extractSaaSData(
+  content: string,
+  url: string,
+  pageType: string
+): Promise<Partial<SaaSExtractionResult>> {
+  const domain = new URL(url).hostname.replace("www.", "");
+
+  const prompt = getSaaSExtractionPrompt(pageType, domain);
+
+  const response = await callGateway("services.OpenRouter.internal.chatCompletion", {
+    model: "google/gemini-2.0-flash-001",
+    messages: [{
+      role: "user",
+      content: `${prompt}\n\nPage content:\n${content.slice(0, 20000)}`,
+    }],
+    responseFormat: { type: "json_object" },
+  });
+
+  try {
+    return JSON.parse(response.choices?.[0]?.message?.content || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function getSaaSExtractionPrompt(pageType: string, domain: string): string {
+  const basePrompt = `You are extracting detailed product/service data from a SaaS company website.
+Site: ${domain}
+Page Type: ${pageType}
+
+CRITICAL RULES:
+1. ONLY extract content that is ACTUALLY PRESENT in the provided content
+2. DO NOT make up, invent, or hallucinate any content
+3. If information is not found, use null or empty arrays
+4. Be precise with product names - use exact names from the page`;
+
+  const pagePrompts: Record<string, string> = {
+    platform: `${basePrompt}
+
+## Extract Platform Architecture
+Look for:
+- Platform name (e.g., "Seismic Enablement Cloud")
+- Main pillars or components
+- Whether it's a unified platform
+- Core value proposition
+
+Return JSON:
+{
+  "platformInfo": {
+    "platformName": "string or null",
+    "pillars": ["array of pillar names"],
+    "isUnifiedPlatform": true/false
+  },
+  "products": [{
+    "name": "...",
+    "type": "platform" | "module" | "add-on",
+    "description": "...",
+    "primaryFunction": "..."
+  }]
+}`,
+
+    pricing: `${basePrompt}
+
+## Extract Pricing/Editions Information
+Look for pricing tiers/plans and feature comparison matrix.
+
+Return JSON:
+{
+  "editions": [{
+    "name": "Professional",
+    "displayName": "Professional Plan",
+    "price": 99,
+    "billingPeriod": "monthly" | "annually",
+    "priceType": "per_user" | "flat" | "custom",
+    "isPopular": true/false,
+    "keyFeatures": ["feature 1", "feature 2"]
+  }],
+  "features": [{
+    "name": "Single Sign-On",
+    "description": "...",
+    "status": "ga" | "beta" | "coming_soon",
+    "includedIn": ["Professional", "Enterprise"]
+  }]
+}`,
+
+    features: `${basePrompt}
+
+## Extract Features/Capabilities
+Look for product features and AI capabilities.
+
+Return JSON:
+{
+  "features": [{
+    "name": "...",
+    "description": "...",
+    "category": "Security" | "AI" | "Analytics" | "Collaboration" | "Other",
+    "status": "ga" | "beta" | "coming_soon"
+  }],
+  "aiCapabilities": [{
+    "name": "...",
+    "type": "agent" | "assistant" | "feature",
+    "description": "...",
+    "status": "ga" | "beta" | "coming_q4_2025"
+  }]
+}`,
+
+    integrations: `${basePrompt}
+
+## Extract Integrations/Marketplace
+Look for native integrations, marketplace apps, and API integrations.
+
+Return JSON:
+{
+  "integrations": [{
+    "name": "Salesforce",
+    "category": "CRM" | "Marketing" | "Collaboration" | "Communication" | "Productivity" | "Analytics" | "Security" | "Storage" | "Other",
+    "type": "native" | "marketplace" | "api" | "partner",
+    "description": "..."
+  }]
+}`,
+
+    services: `${basePrompt}
+
+## Extract Professional Services
+Look for implementation, training, consulting, and support services.
+
+Return JSON:
+{
+  "services": [{
+    "type": "implementation" | "training" | "consulting" | "support" | "managed_service",
+    "name": "...",
+    "description": "...",
+    "pricing": "Custom" | "$X/hour" | etc.,
+    "duration": "4 weeks" | "Ongoing" | etc.
+  }]
+}`,
+  };
+
+  return pagePrompts[pageType] || pagePrompts.features;
+}
+
+/**
+ * Run full SaaS deep extraction on a domain.
+ * Discovers relevant pages and extracts rich product data.
+ *
+ * @param domain - Domain to analyze
+ * @param options - Extraction options
+ * @returns Aggregated SaaS extraction result
+ *
+ * @example
+ * const result = await runSaaSDeepExtraction("seismic.com");
+ * console.log(`Found ${result.products.length} products`);
+ * console.log(`Found ${result.integrations.length} integrations`);
+ */
+export async function runSaaSDeepExtraction(
+  domain: string,
+  options?: {
+    maxPages?: number;
+    includeTypes?: string[];
+  }
+): Promise<SaaSExtractionResult> {
+  const maxPages = options?.maxPages || 10;
+  const includeTypes = options?.includeTypes || ['platform', 'pricing', 'features', 'integrations', 'services'];
+
+  console.log(`[BrandResearch] Starting SaaS deep extraction for ${domain}...`);
+
+  // Step 1: Discover SaaS-relevant URLs
+  const saasUrls = await discoverSaaSUrls(domain);
+  const urlsToProcess = saasUrls
+    .filter(u => includeTypes.includes(u.type))
+    .slice(0, maxPages);
+
+  console.log(`[BrandResearch] Processing ${urlsToProcess.length} SaaS pages...`);
+
+  // Step 2: Extract data from each page
+  const results: Partial<SaaSExtractionResult>[] = [];
+
+  for (const { url, type } of urlsToProcess) {
+    try {
+      console.log(`[BrandResearch] Extracting ${type}: ${url}`);
+      const content = await scrapeWithScrapeDo(url, { scrollCount: 3 });
+      const extracted = await extractSaaSData(content.markdown, url, type);
+      results.push(extracted);
+    } catch (e: any) {
+      console.log(`[BrandResearch] Failed to process ${url}: ${e.message}`);
+    }
+  }
+
+  // Step 3: Merge results
+  const merged: SaaSExtractionResult = {
+    platformInfo: undefined,
+    products: [],
+    editions: [],
+    features: [],
+    integrations: [],
+    services: [],
+    aiCapabilities: [],
+  };
+
+  for (const result of results) {
+    if (result.platformInfo && !merged.platformInfo) {
+      merged.platformInfo = result.platformInfo;
+    }
+    if (result.products) merged.products.push(...result.products);
+    if (result.editions) merged.editions.push(...result.editions);
+    if (result.features) merged.features.push(...result.features);
+    if (result.integrations) merged.integrations.push(...result.integrations);
+    if (result.services) merged.services.push(...result.services);
+    if (result.aiCapabilities) merged.aiCapabilities.push(...result.aiCapabilities);
+  }
+
+  // Step 4: Deduplicate by name
+  const dedupeByName = <T extends { name: string }>(arr: T[]): T[] => {
+    const seen = new Set<string>();
+    return arr.filter(item => {
+      const key = item.name.toLowerCase().trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  merged.products = dedupeByName(merged.products);
+  merged.editions = dedupeByName(merged.editions);
+  merged.features = dedupeByName(merged.features);
+  merged.integrations = dedupeByName(merged.integrations);
+  merged.services = dedupeByName(merged.services);
+  merged.aiCapabilities = dedupeByName(merged.aiCapabilities);
+
+  console.log(`[BrandResearch] SaaS extraction complete:`);
+  console.log(`  Platform: ${merged.platformInfo?.platformName || 'Not found'}`);
+  console.log(`  Products: ${merged.products.length}`);
+  console.log(`  Editions: ${merged.editions.length}`);
+  console.log(`  Features: ${merged.features.length}`);
+  console.log(`  Integrations: ${merged.integrations.length}`);
+  console.log(`  Services: ${merged.services.length}`);
+  console.log(`  AI Capabilities: ${merged.aiCapabilities.length}`);
+
+  return merged;
 }
 
 export interface Product {
