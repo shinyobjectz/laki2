@@ -253,8 +253,24 @@ async function buildCustom(apiKey: string, baseId: string) {
   rmSync(buildDir, { recursive: true, force: true });
   mkdirSync(buildDir, { recursive: true });
 
-  // Copy lakitu source using rsync (more reliable than cpSync for E2B)
-  execSync(`rsync -av --exclude='node_modules' --exclude='.git' --exclude='template' --exclude='cli' --exclude='dist' --exclude='.env*' ${PACKAGE_ROOT}/ ${join(buildDir, "lakitu")}/`, {
+  // Copy lakitu source - only runtime files needed in sandbox
+  execSync(`rsync -av \
+    --exclude='node_modules' \
+    --exclude='.git' \
+    --exclude='template' \
+    --exclude='assets' \
+    --exclude='cli' \
+    --exclude='tests' \
+    --exclude='dist' \
+    --exclude='.github' \
+    --exclude='.env*' \
+    --exclude='.gitignore' \
+    --exclude='.npmignore' \
+    --exclude='tsconfig*.json' \
+    --exclude='vitest.config.ts' \
+    --exclude='CLAUDE.md' \
+    --exclude='scripts' \
+    ${PACKAGE_ROOT}/ ${join(buildDir, "lakitu")}/`, {
     stdio: "pipe",
   });
 
