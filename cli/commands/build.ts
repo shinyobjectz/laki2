@@ -202,22 +202,39 @@ const baseTemplate = Template()
   });
 
 // Custom template: Add Lakitu code + PRE-BUILT Convex state + AUTO-START backend
-function customTemplate(baseId: string, buildDir: string) {
-  return Template()
+function customTemplate(baseId: string, buildDir: string, hasProjectKsa: boolean) {
+  const chownDirs = hasProjectKsa 
+    ? '/home/user/lakitu /home/user/start.sh /home/user/.convex /home/user/project-ksa'
+    : '/home/user/lakitu /home/user/start.sh /home/user/.convex';
+  
+  const copyKsaCmd = hasProjectKsa 
+    ? 'cp -r /home/user/project-ksa/*.ts /home/user/lakitu/ksa/ && '
+    : '';
+
+  const base = Template()
     .fromTemplate(baseId)
     .copy(`${buildDir}/lakitu`, "/home/user/lakitu")
-    .copy(`${buildDir}/start.sh`, "/home/user/start.sh")
+    .copy(`${buildDir}/start.sh`, "/home/user/start.sh");
+  
+  const withKsa = hasProjectKsa 
+    ? base.copy(`${buildDir}/project-ksa`, "/home/user/project-ksa")
+    : base;
+  
+  return withKsa
     .copy(`${buildDir}/convex-state`, "/home/user/.convex/convex-backend-state/lakitu")
     .runCmd(`
-      sudo chown -R user:user /home/user/lakitu /home/user/start.sh /home/user/.convex && \
+      sudo chown -R user:user ${chownDirs} && \
       chmod +x /home/user/start.sh && \
       export HOME=/home/user && \
       export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \
       cd /home/user/lakitu && bun install && \
-      echo '#!/bin/bash\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$@"' | sudo tee /usr/local/bin/generate-pdf && \
+      echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$@"' | sudo tee /usr/local/bin/generate-pdf && \
       sudo chmod +x /usr/local/bin/generate-pdf && \
-      cp -r /home/user/lakitu/ksa /home/user/ksa && \
-      chown -R user:user /home/user/ksa
+      echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$@"' | sudo tee /usr/local/bin/agent-browser && \
+      sudo chmod +x /usr/local/bin/agent-browser && \
+      ${copyKsaCmd}ln -sf /home/user/lakitu/ksa /home/user/ksa && \
+      chown -R user:user /home/user/lakitu/ksa && \
+      echo "KSA modules:" && ls /home/user/lakitu/ksa/*.ts 2>/dev/null | head -20
     `)
     .setEnvs({
       HOME: "/home/user",
@@ -274,15 +291,20 @@ async function buildCustom(apiKey: string, baseId: string) {
     stdio: "pipe",
   });
 
-  // Copy user's project KSAs from lakitu/ folder (if exists)
+  // Copy user's project KSAs from lakitu/ folder to separate directory (if exists)
   const userKsaDir = join(process.cwd(), "lakitu");
+  let hasProjectKsa = false;
   if (existsSync(userKsaDir)) {
     console.log("   Copying project KSAs from lakitu/...");
     const ksaFiles = readdirSync(userKsaDir).filter((f: string) => f.endsWith(".ts"));
-    for (const file of ksaFiles) {
-      cpSync(join(userKsaDir, file), join(buildDir, "lakitu/ksa", file));
+    if (ksaFiles.length > 0) {
+      mkdirSync(join(buildDir, "project-ksa"), { recursive: true });
+      for (const file of ksaFiles) {
+        cpSync(join(userKsaDir, file), join(buildDir, "project-ksa", file));
+      }
+      hasProjectKsa = true;
+      console.log(`   ✓ Copied ${ksaFiles.length} project KSAs`);
     }
-    console.log(`   ✓ Copied ${ksaFiles.length} project KSAs`);
   }
 
   // Copy start script
@@ -300,7 +322,7 @@ async function buildCustom(apiKey: string, baseId: string) {
   // Step 3: Build E2B template with pre-built state
   console.log(`🔧 Building Lakitu custom template on ${baseId}...\n`);
 
-  const result = await Template.build(customTemplate(baseId, buildDir), {
+  const result = await Template.build(customTemplate(baseId, buildDir, hasProjectKsa), {
     alias: "lakitu",
     apiKey,
     onBuildLogs: defaultBuildLogger(),
