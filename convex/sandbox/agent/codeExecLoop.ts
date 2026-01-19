@@ -268,6 +268,31 @@ async function callCloudLLM(
 // ============================================================================
 
 /**
+ * Clear expired session memory and context cache entries.
+ * Fire-and-forget to avoid blocking the agent loop.
+ */
+async function cleanupExpiredCache(sessionId?: string): Promise<void> {
+  if (!sessionId) return;
+
+  try {
+    // Call local Convex to clear expired entries
+    // Uses fetch directly since localDb may not be available in all contexts
+    const convexUrl = process.env.CONVEX_URL || "http://localhost:3210";
+    fetch(`${convexUrl}/api/mutation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: "context/session:clearExpired",
+        args: { sessionId },
+        format: "json",
+      }),
+    }).catch(() => {}); // Fire and forget
+  } catch {
+    // Ignore errors - cleanup is best-effort
+  }
+}
+
+/**
  * Run the code execution agent loop.
  *
  * Architecture:
@@ -290,8 +315,11 @@ export async function runCodeExecLoop(
     sessionId?: string; // For real-time log forwarding to cloud
   } = {}
 ): Promise<CodeExecResult> {
-  // MARKER: Version 2026-01-15-v4 - real-time log forwarding to cloud
-  console.log("🔥🔥🔥 [codeExecLoop] VERSION: 2026-01-15-v4 WITH REAL-TIME LOGS 🔥🔥🔥");
+  // MARKER: Version 2026-01-15-v5 - TTL hygiene + real-time log forwarding
+  console.log("🔥🔥🔥 [codeExecLoop] VERSION: 2026-01-15-v5 WITH TTL HYGIENE 🔥🔥🔥");
+
+  // TTL Hygiene: Clean up expired cache entries at session start
+  cleanupExpiredCache(options.sessionId);
 
   const maxSteps = options.maxSteps || 10;
   const threadId = options.threadId || `codeexec_${Date.now()}`;

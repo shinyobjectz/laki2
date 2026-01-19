@@ -183,6 +183,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             skillIds?: Array<string>;
             title?: string;
             userId: string;
+            workspaceId?: string;
           },
           any,
           Name

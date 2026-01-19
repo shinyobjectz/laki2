@@ -136,6 +136,13 @@ export const cacheContext = mutation({
 
 /**
  * Track file dependency
+ *
+ * Edge types:
+ * - import: fromPath imports toPath
+ * - reference: fromPath references toPath (non-import)
+ * - test: fromPath is a test file for toPath
+ * - config: fromPath is a config for toPath
+ * - generated: fromPath (agent/script) generated toPath
  */
 export const trackDependency = mutation({
   args: {
@@ -146,7 +153,8 @@ export const trackDependency = mutation({
       v.literal("import"),
       v.literal("reference"),
       v.literal("test"),
-      v.literal("config")
+      v.literal("config"),
+      v.literal("generated") // New: tracks files created by agent/scripts
     ),
   },
   handler: async (ctx, args) => {

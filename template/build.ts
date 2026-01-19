@@ -202,11 +202,13 @@ const customTemplate = (baseId: string, buildDir: string) => Template()
   // Copy Lakitu source code
   .copy(`${buildDir}/lakitu`, "/home/user/lakitu")
   .copy(`${buildDir}/start.sh`, "/home/user/start.sh")
+  // Copy project-specific KSAs
+  .copy(`${buildDir}/project-ksa`, "/home/user/project-ksa")
   // Copy PRE-BUILT Convex state (functions already deployed!)
   .copy(`${buildDir}/convex-state`, "/home/user/.convex/convex-backend-state/lakitu")
   // Fix permissions and install dependencies (but NO convex deploy needed!)
   .runCmd(`
-    sudo chown -R user:user /home/user/lakitu /home/user/start.sh /home/user/.convex && \
+    sudo chown -R user:user /home/user/lakitu /home/user/start.sh /home/user/.convex /home/user/project-ksa && \
     chmod +x /home/user/start.sh && \
     export HOME=/home/user && \
     export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \
@@ -215,8 +217,10 @@ const customTemplate = (baseId: string, buildDir: string) => Template()
     sudo chmod +x /usr/local/bin/generate-pdf && \
     echo '#!/bin/bash\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$@"' | sudo tee /usr/local/bin/agent-browser && \
     sudo chmod +x /usr/local/bin/agent-browser && \
-    cp -r /home/user/lakitu/ksa /home/user/ksa && \
-    chown -R user:user /home/user/ksa
+    cp -r /home/user/project-ksa/*.ts /home/user/lakitu/ksa/ && \
+    ln -sf /home/user/lakitu/ksa /home/user/ksa && \
+    chown -R user:user /home/user/lakitu/ksa && \
+    echo "KSA modules:" && ls /home/user/lakitu/ksa/*.ts 2>/dev/null | head -20
   `)
   // Verify state was copied (including sqlite db!)
   .runCmd(`
@@ -266,6 +270,12 @@ async function buildCustom(baseId = "lakitu-base") {
   // Copy lakitu source (excluding node_modules, .git, template)
   await $`rsync -av --exclude='node_modules' --exclude='.git' --exclude='template' ${LAKITU_DIR}/ ${BUILD_DIR}/lakitu/`.quiet();
   await $`cp ${import.meta.dir}/e2b/start.sh ${BUILD_DIR}/`;
+
+  // Copy project-specific KSAs from lakitu/ (project root)
+  const PROJECT_KSA_DIR = `${LAKITU_DIR}/../../lakitu`;
+  await $`mkdir -p ${BUILD_DIR}/project-ksa`.quiet();
+  await $`cp -r ${PROJECT_KSA_DIR}/* ${BUILD_DIR}/project-ksa/`.quiet();
+  console.log("Copied project KSAs to build context");
 
   // Copy pre-built Convex state
   await $`cp -r ${stateDir} ${BUILD_DIR}/convex-state`;

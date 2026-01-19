@@ -41,6 +41,35 @@ export interface BrowserResult<T = unknown> {
 }
 
 // ============================================================================
+// Internal Utilities
+// ============================================================================
+
+const SANDBOX_WORKSPACE = "/home/user/workspace";
+
+/** Get effective cwd - fallback to process.cwd() if sandbox path doesn't exist */
+async function getEffectiveCwd(requestedCwd?: string): Promise<string> {
+  if (requestedCwd) {
+    return requestedCwd;
+  }
+  try {
+    await fs.access(SANDBOX_WORKSPACE);
+    return SANDBOX_WORKSPACE;
+  } catch {
+    return process.cwd();
+  }
+}
+
+/** Escape shell special characters for safe use in double-quoted strings */
+function escapeShellArg(arg: string): string {
+  return arg.replace(/[\\`$"!]/g, "\\$&");
+}
+
+/** Escape regex special characters for grep */
+function escapeGrepPattern(pattern: string): string {
+  return pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ============================================================================
 // File Primitives
 // ============================================================================
 
@@ -70,25 +99,31 @@ export const file = {
     await fs.writeFile(filePath, content.replace(oldText, newText), "utf-8");
   },
 
-  /** Find files matching pattern */
-  async glob(pattern: string, cwd = "/home/user/workspace"): Promise<string[]> {
+  /** Find files matching pattern (sanitized for shell safety) */
+  async glob(pattern: string, cwd?: string): Promise<string[]> {
+    const effectiveCwd = await getEffectiveCwd(cwd);
+    const safePattern = escapeShellArg(pattern);
     const { stdout } = await execAsync(
-      `find . -type f -name "${pattern}" 2>/dev/null | head -100`,
-      { cwd }
+      `find . -type f -name "${safePattern}" 2>/dev/null | head -100`,
+      { cwd: effectiveCwd }
     );
     return stdout
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((f) => path.join(cwd, f));
+      .map((f) => path.join(effectiveCwd, f));
   },
 
-  /** Search file contents */
-  async grep(pattern: string, cwd = "/home/user/workspace"): Promise<GrepMatch[]> {
+  /** Search file contents (sanitized for shell safety). Use literal=true for exact string match. */
+  async grep(pattern: string, cwd?: string, options?: { literal?: boolean }): Promise<GrepMatch[]> {
     try {
+      const effectiveCwd = await getEffectiveCwd(cwd);
+      // Use -F for literal string matching (safer), or escape the pattern for regex
+      const grepFlag = options?.literal ? "-F" : "";
+      const safePattern = options?.literal ? escapeShellArg(pattern) : escapeShellArg(escapeGrepPattern(pattern));
       const { stdout } = await execAsync(
-        `grep -rn "${pattern}" . 2>/dev/null | head -50`,
-        { cwd }
+        `grep -rn ${grepFlag} "${safePattern}" . 2>/dev/null | head -50`,
+        { cwd: effectiveCwd }
       );
       return stdout
         .trim()
@@ -98,7 +133,7 @@ export const file = {
           const match = line.match(/^\.\/(.+?):(\d+):(.*)$/);
           if (!match) return null;
           return {
-            file: path.join(cwd, match[1]),
+            file: path.join(effectiveCwd, match[1]),
             line: parseInt(match[2]),
             content: match[3].trim(),
           };
@@ -146,8 +181,9 @@ export const shell = {
     options?: { cwd?: string; timeout?: number }
   ): Promise<ShellResult> {
     try {
+      const cwd = await getEffectiveCwd(options?.cwd);
       const { stdout, stderr } = await execAsync(command, {
-        cwd: options?.cwd || "/home/user/workspace",
+        cwd,
         timeout: options?.timeout || 30_000,
       });
       return { stdout, stderr, exitCode: 0 };
@@ -162,8 +198,9 @@ export const shell = {
   },
 
   /** Execute command in background (fire-and-forget) */
-  execBackground(command: string, cwd = "/home/user/workspace"): void {
-    exec(command, { cwd }).unref();
+  async execBackground(command: string, cwd?: string): Promise<void> {
+    const effectiveCwd = await getEffectiveCwd(cwd);
+    exec(command, { cwd: effectiveCwd }).unref();
   },
 };
 

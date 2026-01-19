@@ -25,10 +25,18 @@ interface BuildOptions {
   baseId?: string;
 }
 
-async function getApiKey(): Promise<string> {
-  if (process.env.E2B_API_KEY) return process.env.E2B_API_KEY;
+interface ApiKeyResult {
+  key: string;
+  source: string;
+}
 
-  // Check .env.local files
+function findApiKey(): ApiKeyResult | null {
+  // 1. Environment variable
+  if (process.env.E2B_API_KEY) {
+    return { key: process.env.E2B_API_KEY, source: "E2B_API_KEY env var" };
+  }
+
+  // 2. .env files
   const envPaths = [
     join(process.cwd(), ".env.local"),
     join(process.cwd(), ".env"),
@@ -38,20 +46,41 @@ async function getApiKey(): Promise<string> {
     try {
       const content = readFileSync(path, "utf-8");
       const match = content.match(/E2B_API_KEY=(.+)/);
-      if (match) return match[1].trim();
+      if (match) return { key: match[1].trim(), source: path };
     } catch { /* not found */ }
   }
 
-  // Check E2B config
+  // 3. E2B CLI config
   const homeDir = process.env.HOME || process.env.USERPROFILE || "";
   try {
     const configPath = join(homeDir, ".e2b/config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    if (config.teamApiKey) return config.teamApiKey;
-    if (config.accessToken) return config.accessToken;
+    if (config.teamApiKey) return { key: config.teamApiKey, source: "~/.e2b/config.json (teamApiKey)" };
+    if (config.accessToken) return { key: config.accessToken, source: "~/.e2b/config.json (accessToken)" };
   } catch { /* not found */ }
 
-  throw new Error("E2B_API_KEY not found. Set in .env.local or run 'e2b auth login'");
+  return null;
+}
+
+function preflightCheck(): string {
+  const result = findApiKey();
+  
+  if (!result) {
+    console.error("❌ E2B API key not found\n");
+    console.error("To fix this, do ONE of the following:\n");
+    console.error("  1. Set environment variable:");
+    console.error("     export E2B_API_KEY=your_key\n");
+    console.error("  2. Add to .env.local:");
+    console.error("     echo 'E2B_API_KEY=your_key' >> .env.local\n");
+    console.error("  3. Login via E2B CLI:");
+    console.error("     npm install -g @e2b/cli");
+    console.error("     e2b auth login\n");
+    console.error("Get your API key at: https://e2b.dev/dashboard\n");
+    process.exit(1);
+  }
+
+  console.log(`🔑 Using API key from ${result.source}\n`);
+  return result.key;
 }
 
 async function sleep(ms: number) {
@@ -243,7 +272,8 @@ async function buildCustom(apiKey: string, baseId: string) {
 export async function build(options: BuildOptions) {
   console.log("🍄 Lakitu Template Builder\n");
 
-  const apiKey = await getApiKey();
+  // Preflight: Check for API key before doing any work
+  const apiKey = preflightCheck();
 
   if (options.base) {
     await buildBase(apiKey);

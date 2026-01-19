@@ -675,7 +675,8 @@ export const runConvexSandbox = internalAction({
 
             const threadId = agentResult.data?.threadId;
             const agentText = agentResult.data?.text;
-            const agentToolCalls = agentResult.data?.toolCalls;
+            // Agent returns codeExecutions, not toolCalls
+            const agentCodeExecutions = agentResult.data?.codeExecutions || [];
 
             // Validate threadId was returned
             if (!threadId) {
@@ -706,8 +707,8 @@ export const runConvexSandbox = internalAction({
                 const elapsed = Date.now() - startTime;
                 const output = {
                     response: agentText,
-                    toolCalls: agentToolCalls || [],
-                    messageCount: 1,
+                    codeExecutions: agentCodeExecutions,
+                    messageCount: agentCodeExecutions.length + 1,
                 };
 
                 // OPTIMIZED: Single mutation for completion, fire-and-forget log + sandbox kill

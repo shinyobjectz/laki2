@@ -7,11 +7,12 @@
  */
 
 import { watch, type FSWatcher } from "fs";
-import { readdir, stat } from "fs/promises";
+import { readdir, stat, readFile } from "fs/promises";
 import { join, relative } from "path";
+import { createHash } from "crypto";
+import { localDb, SESSION_ID, THREAD_ID } from "../../ksa/_shared/localDb";
 
 const WORKSPACE_PATH = "/home/user/workspace";
-const CONVEX_URL = process.env.CONVEX_URL || "http://localhost:3210";
 
 interface FileEvent {
   type: "create" | "change" | "delete";
@@ -150,27 +151,41 @@ class FileWatcherService {
     const events = [...this.eventQueue];
     this.eventQueue = [];
 
-    try {
-      // Send events to Convex
-      // In a real implementation, this would call a Convex mutation
-      // For now, just log them
-      for (const event of events) {
-        console.log(`[file-watcher] ${event.type}: ${event.path}`);
-      }
+    // Process each event - use fire() for non-blocking persistence
+    for (const event of events) {
+      console.log(`[file-watcher] ${event.type}: ${event.path}`);
 
-      // TODO: Call Convex mutation to track file changes
-      // await fetch(`${CONVEX_URL}/api/mutation`, {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({
-      //     path: "state.files.trackBatch",
-      //     args: { events },
-      //   }),
-      // });
-    } catch (error: any) {
-      // Re-queue events on failure
-      this.eventQueue.unshift(...events);
-      console.error("[file-watcher] Flush failed:", error.message);
+      try {
+        if (event.type === "delete") {
+          // Track deletion (no hash/size)
+          localDb.fire("state/files.trackFileAccess", {
+            sessionId: SESSION_ID,
+            threadId: THREAD_ID,
+            path: event.path,
+            operation: "delete",
+          });
+        } else {
+          // For create/change, compute hash and get size
+          const fullPath = join(WORKSPACE_PATH, event.path);
+          try {
+            const content = await readFile(fullPath);
+            const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
+
+            localDb.fire("state/files.trackFileAccess", {
+              sessionId: SESSION_ID,
+              threadId: THREAD_ID,
+              path: event.path,
+              operation: event.type === "create" ? "write" : "edit",
+              hash,
+              size: content.length,
+            });
+          } catch {
+            // File might have been deleted between event and flush
+          }
+        }
+      } catch (error: any) {
+        console.error(`[file-watcher] Failed to track ${event.path}:`, error.message);
+      }
     }
   }
 }

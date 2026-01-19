@@ -269,6 +269,7 @@ export const startThread = action({
     skillIds: v.optional(v.array(v.string())),
     orgId: v.optional(v.string()),
     boardId: v.optional(v.string()),
+    workspaceId: v.optional(v.string()),
     // Sandbox config from main app (has env var access)
     sandboxConfig: v.optional(v.object({
       sandboxJwt: v.string(),
@@ -289,6 +290,7 @@ export const startThread = action({
       title: args.title || args.content.slice(0, 50),
       orgId: args.orgId,
       boardId: args.boardId,
+      workspaceId: args.workspaceId,
     });
 
     // Send initial message (pass sandboxConfig if provided)

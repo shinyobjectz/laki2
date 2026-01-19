@@ -3,9 +3,8 @@
  *
  * Initialize lakitu in a Convex project:
  * 1. Install @lakitu/sdk as a dependency
- * 2. Create convex/lakitu.config.ts
+ * 2. Create lakitu/ folder with example KSA
  * 3. Add lakitu component to convex.config.ts
- * 4. Create example KSA file
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
@@ -17,67 +16,48 @@ interface InitOptions {
   skipInstall?: boolean;
 }
 
-const LAKITU_CONFIG = `/**
- * Lakitu Configuration
- *
- * Configure your AI agent's capabilities here.
- */
-
-import { Lakitu } from "@lakitu/sdk";
-
-export default Lakitu.configure({
-  // E2B template to use (build with: npx lakitu build)
-  template: "lakitu",
-
-  // Default model for agent
-  model: "anthropic/claude-sonnet-4-20250514",
-
-  // KSA modules to enable
-  ksas: [
-    // Built-in KSAs
-    "file",
-    "shell",
-    "browser",
-    "beads",
-
-    // Custom KSAs (define in convex/lakitu/)
-    // "./example",
-  ],
-
-  // Sandbox pool settings
-  pool: {
-    min: 0,
-    max: 5,
-    idleTimeout: 300_000, // 5 minutes
-  },
-});
-`;
-
 const EXAMPLE_KSA = `/**
- * Example Custom KSA
- *
- * KSAs (Knowledge, Skills, Abilities) are capability modules
- * that the AI agent can use via code execution.
+ * # Example KSA - Custom Capability
+ * 
+ * KSAs (Knowledge, Skills, Abilities) are simple TypeScript functions
+ * that agents can import and use via code execution.
+ * 
+ * ## When to use:
+ * - Wrap your Convex services for agent access
+ * - Add custom capabilities to your agent
+ * 
+ * ## Example:
+ * \`\`\`typescript
+ * import * as example from './ksa/example';
+ * 
+ * const greeting = await example.greet("World");
+ * \`\`\`
  */
+import { callGateway } from "@lakitu/sdk/ksa/gateway";
+import { localDb } from "@lakitu/sdk/ksa/localDb";
 
-import { defineKSA, fn, service } from "@lakitu/sdk";
+/**
+ * Generate a greeting by calling your Convex service.
+ * @param name - Name to greet
+ */
+export async function greet(name: string): Promise<string> {
+  const result = await callGateway("myService.greet", { name });
+  return (result as any)?.message || \`Hello, \${name}!\`;
+}
 
-export const exampleKSA = defineKSA("example")
-  .description("Example KSA showing how to define custom capabilities")
-  .category("skills")
+/**
+ * Save a note using the local sandbox database.
+ */
+export async function saveNote(content: string) {
+  return localDb.mutate("notes:save", { content });
+}
 
-  // Simple function that calls a Convex service
-  .fn("greet", fn()
-    .description("Generate a greeting")
-    .param("name", { type: "string", required: true })
-    .impl(service("myService.greet")
-      .mapArgs(({ name }) => ({ userName: name }))
-    )
-  )
-
-  .build();
-
-export default exampleKSA;
+/**
+ * List all notes from the local database.
+ */
+export async function listNotes() {
+  return localDb.query("notes:list", {});
+}
 `;
 
 const CONVEX_CONFIG_ADDITION = `
@@ -94,7 +74,7 @@ export async function init(options: InitOptions) {
 
   // Check if convex directory exists
   if (!existsSync(convexDir)) {
-    console.error(`❌ Convex directory not found: ${convexDir}`);
+    console.error(\`❌ Convex directory not found: \${convexDir}\`);
     console.log("   Run this command from a Convex project root.");
     process.exit(1);
   }
@@ -103,45 +83,33 @@ export async function init(options: InitOptions) {
   if (!options.skipInstall) {
     console.log("📦 Installing @lakitu/sdk...");
     try {
-      // Detect package manager
-      const useBun = existsSync(join(cwd, "bun.lockb"));
+      const useBun = existsSync(join(cwd, "bun.lockb")) || existsSync(join(cwd, "bun.lock"));
       const usePnpm = existsSync(join(cwd, "pnpm-lock.yaml"));
       const useYarn = existsSync(join(cwd, "yarn.lock"));
 
       const pm = useBun ? "bun" : usePnpm ? "pnpm" : useYarn ? "yarn" : "npm";
       const addCmd = pm === "yarn" ? "add" : "install";
 
-      execSync(`${pm} ${addCmd} @lakitu/sdk`, { stdio: "inherit" });
-      console.log("   ✓ Installed\n");
+      execSync(\`\${pm} \${addCmd} @lakitu/sdk\`, { stdio: "inherit" });
+      console.log("   ✓ Installed\\n");
     } catch (error) {
-      console.warn("   ⚠ Could not auto-install. Run: npm install @lakitu/sdk\n");
+      console.warn("   ⚠ Could not auto-install. Run: npm install @lakitu/sdk\\n");
     }
   }
 
-  // Step 2: Create convex/lakitu/ directory and config
-  const lakituDir = join(convexDir, "lakitu");
+  // Step 2: Create lakitu/ directory at project root
+  const lakituDir = join(cwd, "lakitu");
   if (!existsSync(lakituDir)) {
     mkdirSync(lakituDir, { recursive: true });
+    console.log("📁 Created lakitu/ directory\\n");
   }
 
-  const configPath = join(lakituDir, "config.ts");
-  if (!existsSync(configPath)) {
-    console.log("📝 Creating convex/lakitu/config.ts...");
-    writeFileSync(configPath, LAKITU_CONFIG);
-    console.log("   ✓ Created\n");
-  } else {
-    console.log("📝 convex/lakitu/config.ts already exists, skipping.\n");
-  }
-
-  // Step 3: Create example KSA in convex/lakitu/
+  // Step 3: Create example KSA
   const examplePath = join(lakituDir, "example.ts");
   if (!existsSync(examplePath)) {
     console.log("📝 Creating example KSA...");
-    if (!existsSync(lakituDir)) {
-      mkdirSync(lakituDir, { recursive: true });
-    }
     writeFileSync(examplePath, EXAMPLE_KSA);
-    console.log("   ✓ Created convex/lakitu/example.ts\n");
+    console.log("   ✓ Created lakitu/example.ts\\n");
   }
 
   // Step 4: Check convex.config.ts
@@ -149,18 +117,20 @@ export async function init(options: InitOptions) {
   if (existsSync(convexConfigPath)) {
     const content = readFileSync(convexConfigPath, "utf-8");
     if (!content.includes("@lakitu/sdk")) {
-      console.log("📝 Add this to your convex.config.ts:\n");
-      console.log("   " + CONVEX_CONFIG_ADDITION.trim().split("\n").join("\n   "));
+      console.log("📝 Add this to your convex.config.ts:\\n");
+      console.log("   " + CONVEX_CONFIG_ADDITION.trim().split("\\n").join("\\n   "));
       console.log("");
     }
   }
 
   // Done
-  console.log("✅ Lakitu initialized!\n");
+  console.log("✅ Lakitu initialized!\\n");
   console.log("Next steps:");
   console.log("  1. Add lakitu component to convex.config.ts (see above)");
-  console.log("  2. Define KSAs in convex/lakitu/");
+  console.log("  2. Create KSAs in lakitu/ as simple TypeScript functions");
   console.log("  3. Build template: npx lakitu build");
   console.log("  4. Publish to E2B: npx lakitu publish");
   console.log("");
+  console.log("KSA files are plain TypeScript - import from './ksa/yourfile'");
+  console.log("in your agent code.\\n");
 }
