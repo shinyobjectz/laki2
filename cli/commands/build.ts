@@ -202,29 +202,26 @@ const baseTemplate = Template()
   });
 
 // Custom template: Add Lakitu code + PRE-BUILT Convex state + AUTO-START backend
+// Uses tar files to bypass E2B's extraction issues with directory COPY
 function customTemplate(baseId: string, buildDir: string, hasProjectKsa: boolean) {
-  const chownDirs = hasProjectKsa 
-    ? '/home/user/lakitu /home/user/start.sh /home/user/.convex /home/user/project-ksa'
-    : '/home/user/lakitu /home/user/start.sh /home/user/.convex';
-  
   const copyKsaCmd = hasProjectKsa 
-    ? 'cp -r /home/user/project-ksa/*.ts /home/user/lakitu/ksa/ && '
+    ? 'tar -xzf /tmp/project-ksa.tar.gz -C /home/user && cp -r /home/user/project-ksa/*.ts /home/user/lakitu/ksa/ && '
     : '';
 
-  const base = Template()
+  return Template()
     .fromTemplate(baseId)
-    .copy(`${buildDir}/lakitu`, "/home/user/lakitu")
-    .copy(`${buildDir}/start.sh`, "/home/user/start.sh");
-  
-  const withKsa = hasProjectKsa 
-    ? base.copy(`${buildDir}/project-ksa`, "/home/user/project-ksa")
-    : base;
-  
-  return withKsa
-    .copy(`${buildDir}/convex-state`, "/home/user/.convex/convex-backend-state/lakitu")
+    // Copy tar archives instead of directories
+    .copy(`${buildDir}/lakitu.tar.gz`, "/tmp/lakitu.tar.gz")
+    .copy(`${buildDir}/start.sh`, "/home/user/start.sh")
+    .copy(`${buildDir}/convex-state.tar.gz`, "/tmp/convex-state.tar.gz")
+    .copy(hasProjectKsa ? `${buildDir}/project-ksa.tar.gz` : `${buildDir}/start.sh`, hasProjectKsa ? "/tmp/project-ksa.tar.gz" : "/tmp/dummy.sh")
+    // Extract tars and set up
     .runCmd(`
-      sudo chown -R user:user ${chownDirs} && \
-      chmod +x /home/user/start.sh && \
+      cd /home/user && tar -xzf /tmp/lakitu.tar.gz && \
+      mkdir -p /home/user/.convex/convex-backend-state && \
+      tar -xzf /tmp/convex-state.tar.gz -C /home/user/.convex/convex-backend-state && \
+      mv /home/user/.convex/convex-backend-state/convex-state /home/user/.convex/convex-backend-state/lakitu && \
+      ${copyKsaCmd}chmod +x /home/user/start.sh && \
       export HOME=/home/user && \
       export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \
       cd /home/user/lakitu && bun install && \
@@ -232,8 +229,9 @@ function customTemplate(baseId: string, buildDir: string, hasProjectKsa: boolean
       sudo chmod +x /usr/local/bin/generate-pdf && \
       echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$@"' | sudo tee /usr/local/bin/agent-browser && \
       sudo chmod +x /usr/local/bin/agent-browser && \
-      ${copyKsaCmd}ln -sf /home/user/lakitu/ksa /home/user/ksa && \
-      chown -R user:user /home/user/lakitu/ksa && \
+      ln -sf /home/user/lakitu/ksa /home/user/ksa && \
+      chown -R user:user /home/user/lakitu /home/user/ksa /home/user/.convex && \
+      rm /tmp/*.tar.gz /tmp/dummy.sh 2>/dev/null || true && \
       echo "KSA modules:" && ls /home/user/lakitu/ksa/*.ts 2>/dev/null | head -20
     `)
     .setEnvs({
@@ -316,6 +314,14 @@ async function buildCustom(apiKey: string, baseId: string) {
 
   // Copy pre-built Convex state
   cpSync(stateDir, join(buildDir, "convex-state"), { recursive: true });
+
+  // Create tar archives to bypass E2B's extraction issues
+  console.log("   Creating tar archives...");
+  execSync(`cd ${buildDir} && tar -czf lakitu.tar.gz lakitu`, { stdio: "pipe" });
+  execSync(`cd ${buildDir} && tar -czf convex-state.tar.gz convex-state`, { stdio: "pipe" });
+  if (hasProjectKsa) {
+    execSync(`cd ${buildDir} && tar -czf project-ksa.tar.gz project-ksa`, { stdio: "pipe" });
+  }
 
   console.log("   ✓ Build context ready\n");
 
