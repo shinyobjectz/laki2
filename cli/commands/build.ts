@@ -306,4 +306,7 @@ export async function build(options: BuildOptions) {
   }
 
   console.log("\n🎉 Build complete!");
+  
+  // Force exit - E2B SDK keeps event loop alive
+  process.exit(0);
 }
