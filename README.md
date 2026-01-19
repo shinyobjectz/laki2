@@ -187,33 +187,42 @@ The agent can pick up exactly where it left off, even across sessions or handoff
 
 Real-world agent task benchmarks across different models. All tests run in isolated E2B sandboxes with full code execution.
 
-### Code Generation Tasks
+### Code Generation
 
-| Model | Pass Rate | Avg Latency | Tasks |
-|-------|-----------|-------------|-------|
-| **Claude Sonnet 4.5** | 100% | 27.9s | fibonacci, palindrome, array_sum, prime_check, reverse_string |
-| **Claude Haiku 4.5** | 80% | 12.7s | 4/5 passed |
-| **Gemini 3 Flash** | 80% | 16.0s | 4/5 passed |
+| Model | Pass Rate | Avg Latency |
+|-------|-----------|-------------|
+| **Claude Sonnet 4.5** | 100% (5/5) | 27.9s |
+| **Claude Haiku 4.5** | 80% (4/5) | 12.7s |
+| **Gemini 3 Flash Preview** | 80% (4/5) | 16.0s |
 
-### File Operations
+Tasks: fibonacci, palindrome, array_sum, prime_check, reverse_string
 
-| Model | Pass Rate | Avg Latency | Tasks |
-|-------|-----------|-------------|-------|
-| **Claude Sonnet 4.5** | 100% | 20.7s | write_and_read, create_json, list_directory |
+### GAIA Research (Long-Horizon)
 
-### What's Being Measured
+| Model | Pass Rate | Avg Latency |
+|-------|-----------|-------------|
+| **Gemini 3 Flash Preview** | 67% (2/3) | 42.0s |
+| **Claude Haiku 4.5** | 33% (1/3) | 49.4s |
 
-Each benchmark:
-1. Spins up fresh E2B sandbox (~150ms)
-2. Agent writes TypeScript code importing KSAs
-3. Code executes in sandbox
-4. Results verified against expected output
+Tasks: research_synthesis, multimodal_analysis, tool_orchestration
 
-**Example task (fibonacci):**
-```
-Prompt: "Write a TypeScript function that returns the nth Fibonacci number. Test it with n=10."
-Expected: Agent writes function, executes it, outputs 55
-```
+### Static Page Creation
+
+| Model | Pass Rate | Avg Latency |
+|-------|-----------|-------------|
+| **Gemini 3 Flash Preview** | 100% (3/3) | 78.3s |
+| **Claude Haiku 4.5** | 0% (0/3) | 24.1s |
+
+Tasks: landing_page, portfolio_page, documentation_page
+
+### Summary
+
+| Category | Best Model | Notes |
+|----------|------------|-------|
+| **Code Generation** | Claude Sonnet 4.5 | Most reliable (100%) |
+| **Research Tasks** | Gemini 3 Flash | Better at multi-step reasoning |
+| **Page Creation** | Gemini 3 Flash | Better output verbosity |
+| **Speed** | Claude Haiku 4.5 | 2-3x faster than others |
 
 ### Run Your Own
 
@@ -221,14 +230,17 @@ Expected: Agent writes function, executes it, outputs 55
 # Quick sanity check
 bun convex run utils/dev/benchmarks/lakitu:runQuick
 
-# Full code generation suite
+# Code generation
 bun convex run utils/dev/benchmarks/lakitu:runCodeGen
 
-# All benchmarks
-bun convex run utils/dev/benchmarks/lakitu:runAll
+# GAIA research tasks
+bun convex run utils/dev/benchmarks/longHorizon:runGAIA
+
+# Static pages
+bun convex run utils/dev/benchmarks/staticPages:runAll
 
 # Specific model
-bun convex run utils/dev/benchmarks/lakitu:runAll '{"model": "anthropic/claude-haiku-4.5"}'
+bun convex run utils/dev/benchmarks/lakitu:runAll '{"model": "google/gemini-3-flash-preview"}'
 ```
 
 ---
