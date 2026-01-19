@@ -11,7 +11,7 @@
  */
 
 import { Template, defaultBuildLogger, waitForPort } from "e2b";
-import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync, cpSync, writeFileSync, readFileSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
@@ -255,7 +255,7 @@ async function buildCustom(apiKey: string, baseId: string) {
   const userKsaDir = join(process.cwd(), "lakitu");
   if (existsSync(userKsaDir)) {
     console.log("   Copying project KSAs from lakitu/...");
-    const ksaFiles = require("fs").readdirSync(userKsaDir).filter((f: string) => f.endsWith(".ts"));
+    const ksaFiles = readdirSync(userKsaDir).filter((f: string) => f.endsWith(".ts"));
     for (const file of ksaFiles) {
       cpSync(join(userKsaDir, file), join(buildDir, "lakitu/ksa", file));
     }
