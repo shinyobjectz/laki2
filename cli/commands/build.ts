@@ -1,13 +1,8 @@
 /**
  * lakitu build
  *
- * Build E2B sandbox template with pre-deployed Convex functions.
- *
- * Strategy:
- * 1. Start local convex-backend
- * 2. Deploy sandbox functions with `convex dev --once`
- * 3. Capture the state directory
- * 4. Build E2B template with pre-built state baked in
+ * Build E2B sandbox template using Dockerfile approach.
+ * Uses fromDockerfile() to leverage Docker's COPY instead of SDK's problematic tar streaming.
  */
 
 import { Template, defaultBuildLogger, waitForPort } from "e2b";
@@ -17,7 +12,6 @@ import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Handle both TS source (cli/commands) and compiled JS (dist/cli/commands)
 const PACKAGE_ROOT = __dirname.includes("/dist/") 
   ? join(__dirname, "../../..") 
   : join(__dirname, "../..");
@@ -34,12 +28,10 @@ interface ApiKeyResult {
 }
 
 function findApiKey(): ApiKeyResult | null {
-  // 1. Environment variable
   if (process.env.E2B_API_KEY) {
     return { key: process.env.E2B_API_KEY, source: "E2B_API_KEY env var" };
   }
 
-  // 2. .env files
   const envPaths = [
     join(process.cwd(), ".env.local"),
     join(process.cwd(), ".env"),
@@ -53,13 +45,12 @@ function findApiKey(): ApiKeyResult | null {
     } catch { /* not found */ }
   }
 
-  // 3. E2B CLI config
   const homeDir = process.env.HOME || process.env.USERPROFILE || "";
   try {
     const configPath = join(homeDir, ".e2b/config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    if (config.teamApiKey) return { key: config.teamApiKey, source: "~/.e2b/config.json (teamApiKey)" };
-    if (config.accessToken) return { key: config.accessToken, source: "~/.e2b/config.json (accessToken)" };
+    if (config.teamApiKey) return { key: config.teamApiKey, source: "~/.e2b/config.json" };
+    if (config.accessToken) return { key: config.accessToken, source: "~/.e2b/config.json" };
   } catch { /* not found */ }
 
   return null;
@@ -70,15 +61,7 @@ function preflightCheck(): string {
   
   if (!result) {
     console.error("❌ E2B API key not found\n");
-    console.error("To fix this, do ONE of the following:\n");
-    console.error("  1. Set environment variable:");
-    console.error("     export E2B_API_KEY=your_key\n");
-    console.error("  2. Add to .env.local:");
-    console.error("     echo 'E2B_API_KEY=your_key' >> .env.local\n");
-    console.error("  3. Login via E2B CLI:");
-    console.error("     npm install -g @e2b/cli");
-    console.error("     e2b auth login\n");
-    console.error("Get your API key at: https://e2b.dev/dashboard\n");
+    console.error("Set E2B_API_KEY in .env.local or run 'e2b auth login'\n");
     process.exit(1);
   }
 
@@ -90,97 +73,7 @@ async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Pre-build Convex locally: start backend, deploy functions, capture state
- */
-async function prebuildConvex(): Promise<string> {
-  const stateDir = "/tmp/lakitu-convex-state";
-  const sandboxConvexDir = join(PACKAGE_ROOT, "convex/sandbox");
-
-  console.log("=== Pre-building Convex locally ===");
-
-  // Clean up any existing state
-  rmSync(stateDir, { recursive: true, force: true });
-  mkdirSync(stateDir, { recursive: true });
-
-  // Kill any existing convex-backend
-  try {
-    execSync("pkill -f convex-backend", { stdio: "ignore" });
-    await sleep(1000);
-  } catch { /* not running */ }
-
-  console.log("Starting local convex-backend...");
-
-  // Filter out Bun's node shim from PATH so convex-backend finds real Node.js
-  const cleanPath = (process.env.PATH || "")
-    .split(":")
-    .filter(p => !p.includes("bun-node-"))
-    .join(":");
-
-  // Start convex-backend in background
-  const backend = spawn("convex-backend", [
-    join(stateDir, "convex_local_backend.sqlite3"),
-    "--port", "3210",
-    "--site-proxy-port", "3211",
-    "--local-storage", stateDir,
-  ], {
-    cwd: stateDir,
-    stdio: "pipe",
-    env: { ...process.env, PATH: cleanPath },
-  });
-
-  // Wait for backend to be ready
-  console.log("Waiting for backend to be ready...");
-  for (let i = 0; i < 30; i++) {
-    try {
-      const res = await fetch("http://127.0.0.1:3210/version");
-      if (res.ok) {
-        console.log(`Backend ready after ${i + 1} seconds`);
-        break;
-      }
-    } catch { /* not ready yet */ }
-
-    if (i === 29) {
-      backend.kill();
-      throw new Error("Backend failed to start after 30 seconds");
-    }
-    await sleep(1000);
-  }
-
-  // Deploy functions using convex dev --once
-  console.log("Deploying functions with convex dev --once...");
-
-  const tempEnvFile = "/tmp/lakitu-convex-env";
-  writeFileSync(tempEnvFile, `CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
-CONVEX_SELF_HOSTED_ADMIN_KEY=0135d8598650f8f5cb0f30c34ec2e2bb62793bc28717c8eb6fb577996d50be5f4281b59181095065c5d0f86a2c31ddbe9b597ec62b47ded69782cd
-`);
-
-  try {
-    // Run from package root where convex.json is (specifies functions: "convex/sandbox")
-    execSync(`npx convex dev --once --typecheck disable --env-file ${tempEnvFile}`, {
-      cwd: PACKAGE_ROOT,
-      stdio: "inherit",
-      env: { ...process.env, CONVEX_DEPLOYMENT: undefined, PATH: cleanPath },
-    });
-    console.log("Functions deployed successfully!");
-  } catch (error) {
-    backend.kill();
-    throw new Error("Convex deploy failed");
-  }
-
-  // Give backend a moment to flush state
-  await sleep(2000);
-
-  // Stop backend gracefully
-  console.log("Stopping backend...");
-  backend.kill("SIGTERM");
-  await sleep(1000);
-
-  console.log("=== Pre-build complete ===\n");
-  return stateDir;
-}
-
-// Base template: Ubuntu + Bun + Convex Backend + Node.js
+// Base template using standard Template builder
 const baseTemplate = Template()
   .fromImage("e2bdev/code-interpreter:latest")
   .runCmd("sudo apt-get update && sudo apt-get install -y git curl sqlite3 libsqlite3-dev build-essential unzip")
@@ -201,49 +94,6 @@ const baseTemplate = Template()
     LOCAL_CONVEX_URL: "http://localhost:3210",
   });
 
-// Custom template: Add Lakitu code + PRE-BUILT Convex state + AUTO-START backend
-// Uses tar files to bypass E2B's extraction issues with directory COPY
-function customTemplate(baseId: string, buildDir: string, hasProjectKsa: boolean) {
-  const copyKsaCmd = hasProjectKsa 
-    ? 'tar -xzf /tmp/project-ksa.tar.gz -C /home/user && cp -r /home/user/project-ksa/*.ts /home/user/lakitu/ksa/ && '
-    : '';
-
-  return Template()
-    .fromTemplate(baseId)
-    // Copy tar archives instead of directories
-    .copy(`${buildDir}/lakitu.tar.gz`, "/tmp/lakitu.tar.gz")
-    .copy(`${buildDir}/start.sh`, "/home/user/start.sh")
-    .copy(`${buildDir}/convex-state.tar.gz`, "/tmp/convex-state.tar.gz")
-    .copy(hasProjectKsa ? `${buildDir}/project-ksa.tar.gz` : `${buildDir}/start.sh`, hasProjectKsa ? "/tmp/project-ksa.tar.gz" : "/tmp/dummy.sh")
-    // Extract tars and set up
-    .runCmd(`
-      cd /home/user && tar -xzf /tmp/lakitu.tar.gz && \
-      mkdir -p /home/user/.convex/convex-backend-state && \
-      tar -xzf /tmp/convex-state.tar.gz -C /home/user/.convex/convex-backend-state && \
-      mv /home/user/.convex/convex-backend-state/convex-state /home/user/.convex/convex-backend-state/lakitu && \
-      ${copyKsaCmd}chmod +x /home/user/start.sh && \
-      export HOME=/home/user && \
-      export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \
-      cd /home/user/lakitu && bun install && \
-      echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$@"' | sudo tee /usr/local/bin/generate-pdf && \
-      sudo chmod +x /usr/local/bin/generate-pdf && \
-      echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$@"' | sudo tee /usr/local/bin/agent-browser && \
-      sudo chmod +x /usr/local/bin/agent-browser && \
-      ln -sf /home/user/lakitu/ksa /home/user/ksa && \
-      chown -R user:user /home/user/lakitu /home/user/ksa /home/user/.convex && \
-      rm /tmp/*.tar.gz /tmp/dummy.sh 2>/dev/null || true && \
-      echo "KSA modules:" && ls /home/user/lakitu/ksa/*.ts 2>/dev/null | head -20
-    `)
-    .setEnvs({
-      HOME: "/home/user",
-      PATH: "/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin",
-      CONVEX_URL: "http://localhost:3210",
-      LOCAL_CONVEX_URL: "http://localhost:3210",
-      CONVEX_LOCAL_STORAGE: "/home/user/.convex/convex-backend-state/lakitu",
-    })
-    .setStartCmd("/home/user/start.sh", waitForPort(3210));
-}
-
 async function buildBase(apiKey: string) {
   console.log("🔧 Building Lakitu base template...\n");
 
@@ -260,15 +110,11 @@ async function buildBase(apiKey: string) {
 async function buildCustom(apiKey: string, baseId: string) {
   const buildDir = "/tmp/lakitu-build";
 
-  // Step 1: Pre-build Convex locally
-  const stateDir = await prebuildConvex();
-
-  // Step 2: Prepare build context
-  console.log("📦 Preparing build context...");
+  console.log("📦 Preparing Dockerfile build context...");
   rmSync(buildDir, { recursive: true, force: true });
   mkdirSync(buildDir, { recursive: true });
 
-  // Copy lakitu source - only runtime files needed in sandbox
+  // Copy lakitu source
   execSync(`rsync -av \
     --exclude='node_modules' \
     --exclude='.git' \
@@ -290,60 +136,86 @@ async function buildCustom(apiKey: string, baseId: string) {
     stdio: "pipe",
   });
 
-  // Copy user's project KSAs from lakitu/ folder to separate directory (if exists)
+  // Copy user's project KSAs
   const userKsaDir = join(process.cwd(), "lakitu");
-  let hasProjectKsa = false;
   if (existsSync(userKsaDir)) {
     console.log("   Copying project KSAs from lakitu/...");
     const ksaFiles = readdirSync(userKsaDir).filter((f: string) => f.endsWith(".ts"));
-    if (ksaFiles.length > 0) {
-      mkdirSync(join(buildDir, "project-ksa"), { recursive: true });
-      for (const file of ksaFiles) {
-        cpSync(join(userKsaDir, file), join(buildDir, "project-ksa", file));
-      }
-      hasProjectKsa = true;
-      console.log(`   ✓ Copied ${ksaFiles.length} project KSAs`);
+    for (const file of ksaFiles) {
+      cpSync(join(userKsaDir, file), join(buildDir, "lakitu/ksa", file));
     }
+    console.log(`   ✓ Copied ${ksaFiles.length} project KSAs`);
   }
 
   // Copy start script
   cpSync(join(PACKAGE_ROOT, "template/e2b/start.sh"), join(buildDir, "start.sh"));
 
-  // Add timestamp file to force E2B cache invalidation
-  // This ensures E2B re-uploads the lakitu directory instead of using stale cache
-  writeFileSync(join(buildDir, "lakitu/.build-timestamp"), Date.now().toString());
+  // Create Dockerfile that builds on base template
+  const dockerfile = `# Lakitu Custom Template
+FROM ${baseId}
 
-  // Copy pre-built Convex state
-  cpSync(stateDir, join(buildDir, "convex-state"), { recursive: true });
+# Copy lakitu code (using Docker's COPY, not SDK's tar streaming)
+COPY --chown=user:user lakitu/ /home/user/lakitu/
+COPY --chown=user:user start.sh /home/user/start.sh
 
-  // Create tar archives to bypass E2B's extraction issues
-  console.log("   Creating tar archives...");
-  execSync(`cd ${buildDir} && tar -czf lakitu.tar.gz lakitu`, { stdio: "pipe" });
-  execSync(`cd ${buildDir} && tar -czf convex-state.tar.gz convex-state`, { stdio: "pipe" });
-  if (hasProjectKsa) {
-    execSync(`cd ${buildDir} && tar -czf project-ksa.tar.gz project-ksa`, { stdio: "pipe" });
-  }
+# Install dependencies and set up
+RUN chmod +x /home/user/start.sh && \\
+    export HOME=/home/user && \\
+    export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \\
+    cd /home/user/lakitu && /home/user/.bun/bin/bun install && \\
+    echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$@"' | sudo tee /usr/local/bin/generate-pdf && \\
+    sudo chmod +x /usr/local/bin/generate-pdf && \\
+    echo '#!/bin/bash\\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$@"' | sudo tee /usr/local/bin/agent-browser && \\
+    sudo chmod +x /usr/local/bin/agent-browser && \\
+    ln -sf /home/user/lakitu/ksa /home/user/ksa && \\
+    chown -R user:user /home/user/lakitu /home/user/ksa
 
+# Pre-deploy Convex functions
+RUN export HOME=/home/user && \\
+    export PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin" && \\
+    export CONVEX_LOCAL_STORAGE=/home/user/.convex/convex-backend-state/lakitu && \\
+    mkdir -p $CONVEX_LOCAL_STORAGE && \\
+    cd /home/user/lakitu && \\
+    convex-backend --port 3210 --site-proxy-port 3211 --local-storage $CONVEX_LOCAL_STORAGE & \\
+    sleep 5 && \\
+    ./node_modules/.bin/convex dev --once --typecheck disable && \\
+    sleep 2 && \\
+    pkill convex-backend || true && \\
+    chown -R user:user /home/user/.convex
+
+ENV HOME=/home/user
+ENV PATH="/home/user/.bun/bin:/usr/local/bin:/usr/bin:/bin"
+ENV CONVEX_URL="http://localhost:3210"
+ENV LOCAL_CONVEX_URL="http://localhost:3210"
+ENV CONVEX_LOCAL_STORAGE="/home/user/.convex/convex-backend-state/lakitu"
+
+USER user
+WORKDIR /home/user/workspace
+`;
+
+  writeFileSync(join(buildDir, "Dockerfile"), dockerfile);
   console.log("   ✓ Build context ready\n");
 
-  // Step 3: Build E2B template with pre-built state
-  console.log(`🔧 Building Lakitu custom template on ${baseId}...\n`);
+  console.log(`🔧 Building Lakitu custom template (Dockerfile method)...\n`);
 
-  const result = await Template.build(customTemplate(baseId, buildDir, hasProjectKsa), {
+  // Use fromDockerfile which leverages Docker's COPY instead of SDK tar streaming
+  const template = Template()
+    .fromDockerfile(join(buildDir, "Dockerfile"))
+    .setStartCmd("/home/user/start.sh", waitForPort(3210));
+
+  const result = await Template.build(template, {
     alias: "lakitu",
     apiKey,
     onBuildLogs: defaultBuildLogger(),
   });
 
   console.log(`\n✅ Custom template: ${result.templateId}`);
-  console.log("   Functions are PRE-DEPLOYED - sandbox starts instantly!");
   return result.templateId;
 }
 
 export async function build(options: BuildOptions) {
-  console.log("🍄 Lakitu Template Builder\n");
+  console.log("🍄 Lakitu Template Builder (Dockerfile method)\n");
 
-  // Preflight: Check for API key before doing any work
   const apiKey = preflightCheck();
 
   if (options.base) {
@@ -351,13 +223,10 @@ export async function build(options: BuildOptions) {
   } else if (options.custom) {
     await buildCustom(apiKey, options.baseId || "lakitu-base");
   } else {
-    // Build both
     const baseId = await buildBase(apiKey);
     await buildCustom(apiKey, baseId);
   }
 
   console.log("\n🎉 Build complete!");
-  
-  // Force exit - E2B SDK keeps event loop alive
   process.exit(0);
 }
