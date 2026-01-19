@@ -272,6 +272,10 @@ async function buildCustom(apiKey: string, baseId: string) {
   // Copy start script
   cpSync(join(PACKAGE_ROOT, "template/e2b/start.sh"), join(buildDir, "start.sh"));
 
+  // Add timestamp file to force E2B cache invalidation
+  // This ensures E2B re-uploads the lakitu directory instead of using stale cache
+  writeFileSync(join(buildDir, "lakitu/.build-timestamp"), Date.now().toString());
+
   // Copy pre-built Convex state
   cpSync(stateDir, join(buildDir, "convex-state"), { recursive: true });
 
