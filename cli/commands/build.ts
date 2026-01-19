@@ -17,7 +17,10 @@ import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = join(__dirname, "../..");
+// Handle both TS source (cli/commands) and compiled JS (dist/cli/commands)
+const PACKAGE_ROOT = __dirname.includes("/dist/") 
+  ? join(__dirname, "../../..") 
+  : join(__dirname, "../..");
 
 interface BuildOptions {
   base?: boolean;
