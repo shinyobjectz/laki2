@@ -198,8 +198,9 @@ WORKDIR /home/user/workspace
 
   console.log(`🔧 Building Lakitu custom template (Dockerfile method)...\n`);
 
-  // Use fromDockerfile which leverages Docker's COPY instead of SDK tar streaming
-  const template = Template()
+  // Use fromDockerfile with fileContextPath to leverage Docker's COPY
+  // This bypasses the problematic SDK tar streaming that fails via npm/bunx
+  const template = Template({ fileContextPath: buildDir })
     .fromDockerfile(join(buildDir, "Dockerfile"))
     .setStartCmd("/home/user/start.sh", waitForPort(3210));
 
