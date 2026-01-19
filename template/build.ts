@@ -190,10 +190,11 @@ const baseTemplate = Template()
     mkdir -p /home/user/workspace /home/user/.convex/convex-backend-state/lakitu /home/user/artifacts && \
     chown -R user:user /home/user
   `)
-  // Install crawl4ai for web scraping with residential proxy support
+  // Install crawl4ai for web scraping with Playwright browsers for JS rendering
   .runCmd(`
-    pip3 install crawl4ai && \
-    crawl4ai-setup --no-browsers
+    pip3 install crawl4ai playwright && \
+    /home/user/.local/bin/playwright install chromium --with-deps && \
+    /home/user/.local/bin/crawl4ai-setup || true
   `)
   .setEnvs({
     HOME: "/home/user",
@@ -274,8 +275,24 @@ async function buildCustom(baseId = "lakitu-base") {
   await $`rm -rf ${BUILD_DIR}`.quiet();
   await $`mkdir -p ${BUILD_DIR}`.quiet();
 
-  // Copy lakitu source (excluding node_modules, .git, template)
-  await $`rsync -av --exclude='node_modules' --exclude='.git' --exclude='template' ${LAKITU_DIR}/ ${BUILD_DIR}/lakitu/`.quiet();
+  // Copy lakitu source - only runtime files needed in sandbox
+  await $`rsync -av \
+    --exclude='node_modules' \
+    --exclude='.git' \
+    --exclude='template' \
+    --exclude='assets' \
+    --exclude='cli' \
+    --exclude='tests' \
+    --exclude='dist' \
+    --exclude='.github' \
+    --exclude='.env.local' \
+    --exclude='.gitignore' \
+    --exclude='.npmignore' \
+    --exclude='tsconfig*.json' \
+    --exclude='vitest.config.ts' \
+    --exclude='CLAUDE.md' \
+    --exclude='scripts' \
+    ${LAKITU_DIR}/ ${BUILD_DIR}/lakitu/`.quiet();
   await $`cp ${import.meta.dir}/e2b/start.sh ${BUILD_DIR}/`;
 
   // Copy project-specific KSAs from lakitu/ (project root)

@@ -23,6 +23,7 @@ import type * as context_session from "../context/session.js";
 import type * as index from "../index.js";
 import type * as nodeActions_codeExec from "../nodeActions/codeExec.js";
 import type * as planning_beads from "../planning/beads.js";
+import type * as planning_bootstrap from "../planning/bootstrap.js";
 import type * as planning_index from "../planning/index.js";
 import type * as planning_sync from "../planning/sync.js";
 import type * as prompts_codeExec from "../prompts/codeExec.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   index: typeof index;
   "nodeActions/codeExec": typeof nodeActions_codeExec;
   "planning/beads": typeof planning_beads;
+  "planning/bootstrap": typeof planning_bootstrap;
   "planning/index": typeof planning_index;
   "planning/sync": typeof planning_sync;
   "prompts/codeExec": typeof prompts_codeExec;
