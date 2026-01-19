@@ -244,17 +244,9 @@ async function buildCustom(apiKey: string, baseId: string) {
   rmSync(buildDir, { recursive: true, force: true });
   mkdirSync(buildDir, { recursive: true });
 
-  // Copy lakitu source (excluding node_modules, .git, template, cli, dist, .env*)
-  const excludes = ["node_modules", ".git", "template", "cli", "dist"];
-  cpSync(PACKAGE_ROOT, join(buildDir, "lakitu"), {
-    recursive: true,
-    filter: (src) => {
-      // Get path relative to PACKAGE_ROOT to avoid matching parent directories
-      const rel = src.slice(PACKAGE_ROOT.length);
-      // Exclude .env files (convex creates .env.local during build)
-      if (rel.includes(".env")) return false;
-      return !excludes.some(ex => rel.includes(`/${ex}`));
-    },
+  // Copy lakitu source using rsync (more reliable than cpSync for E2B)
+  execSync(`rsync -av --exclude='node_modules' --exclude='.git' --exclude='template' --exclude='cli' --exclude='dist' --exclude='.env*' ${PACKAGE_ROOT}/ ${join(buildDir, "lakitu")}/`, {
+    stdio: "pipe",
   });
 
   // Copy user's project KSAs from lakitu/ folder (if exists)
