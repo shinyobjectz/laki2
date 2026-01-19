@@ -150,7 +150,8 @@ CONVEX_SELF_HOSTED_ADMIN_KEY=0135d8598650f8f5cb0f30c34ec2e2bb62793bc28717c8eb6fb
 
   try {
     // Run from package root where convex.json is (specifies functions: "convex/sandbox")
-    execSync(`npx convex dev --once --typecheck disable --env-file ${tempEnvFile}`, {
+    // Use /bin/bash to ensure user's PATH is available (needed for Node.js when running via bunx --bun)
+    execSync(`/bin/bash -l -c 'npx convex dev --once --typecheck disable --env-file ${tempEnvFile}'`, {
       cwd: PACKAGE_ROOT,
       stdio: "inherit",
       env: { ...process.env, CONVEX_DEPLOYMENT: undefined },
