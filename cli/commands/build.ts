@@ -182,6 +182,9 @@ COPY --chown=user:user start.sh /home/user/start.sh
 RUN chmod +x /home/user/start.sh && \\
     cd /home/user/lakitu && /home/user/.bun/bin/bun install
 
+# Python Playwright for FlareSolverr bot bypass
+RUN pip3 install playwright && playwright install chromium --with-deps
+
 # Create CLI tools
 RUN printf '#!/bin/bash\\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$$@"\\n' > /usr/local/bin/generate-pdf && chmod +x /usr/local/bin/generate-pdf
 RUN printf '#!/bin/bash\\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$$@"\\n' > /usr/local/bin/agent-browser && chmod +x /usr/local/bin/agent-browser
