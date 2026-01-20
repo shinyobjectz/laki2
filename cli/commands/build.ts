@@ -188,9 +188,8 @@ RUN pip3 install playwright markitdown
 
 # Patchright - stealth Chromium that bypasses CDP detection (Cloudflare, DataDome)
 # https://github.com/Kaliiiiiiiiii-Vinyzu/patchright
-# Install globally AND in lakitu project so dynamic imports work from KSA context
-RUN npm install -g patchright && npx patchright install chrome && \
-    cd /home/user/lakitu && /home/user/.bun/bin/bun add patchright
+# Install globally for CLI and browser binaries
+RUN npm install -g patchright && npx patchright install chrome
 
 # Create CLI tools (must be root)
 RUN printf '#!/bin/bash\\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$$@"\\n' > /usr/local/bin/generate-pdf && chmod +x /usr/local/bin/generate-pdf
@@ -209,6 +208,10 @@ ENV LOCAL_CONVEX_URL="http://localhost:3210"
 ENV CONVEX_LOCAL_STORAGE="/home/user/.convex/convex-backend-state/lakitu"
 
 USER user
+
+# Install patchright in lakitu project for dynamic imports from KSA context
+RUN cd /home/user/lakitu && bun add patchright
+
 WORKDIR /home/user/workspace
 `;
 
