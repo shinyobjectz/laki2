@@ -266,38 +266,145 @@ export const spawn = internalAction({
 });
 
 /**
- * Execute subagent task with tool loop
- * @deprecated Legacy tool system removed - use code execution mode instead
+ * Run subagent code execution loop
+ * Uses the same pattern as the main agent - LLM generates code, we execute it.
  */
-async function runSubagentLoop(
-  _ctx: any,
-  _systemPrompt: string,
-  _task: string,
-  _toolNames: string[],
-  _model: string,
-  _maxSteps: number = 5
-): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  throw new Error(
-    "Legacy subagent tool system is deprecated. Use code execution mode with KSAs instead."
-  );
-}
+async function runSubagentCodeExecLoop(
+  ctx: any,
+  systemPrompt: string,
+  task: string,
+  model: string,
+  maxSteps: number = 5,
+  onProgress?: (step: ChainOfThoughtStep) => Promise<void>
+): Promise<{ text: string; codeExecutions: Array<{ code: string; output: string; success: boolean }> }> {
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: `Task: ${task}\n\nYou have access to KSAs (Knowledge, Skills, Abilities) via imports from './ksa/'. Write TypeScript code to accomplish this task.\n\nRespond with JSON containing:\n- "thinking": Your reasoning\n- "code": TypeScript code to execute (or empty if done)\n- "response": Final result when task is complete` },
+  ];
 
-/**
- * Execute subagent task with tool loop and progress emission
- * @deprecated Legacy tool system removed - use code execution mode instead
- */
-async function runSubagentLoopWithProgress(
-  _ctx: any,
-  _systemPrompt: string,
-  _task: string,
-  _toolNames: string[],
-  _model: string,
-  _maxSteps: number = 5,
-  _onProgress?: (step: ChainOfThoughtStep) => Promise<void>
-): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  throw new Error(
-    "Legacy subagent tool system is deprecated. Use code execution mode with KSAs instead."
-  );
+  const allExecutions: Array<{ code: string; output: string; success: boolean }> = [];
+  let finalText = "";
+
+  for (let step = 0; step < maxSteps; step++) {
+    // Call LLM via local sandbox
+    let llmResponse: string;
+    try {
+      const res = await fetch("http://localhost:3210/api/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: "agent/index:callLLM",
+          args: { messages, model },
+          format: "json",
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`LLM call failed: ${await res.text()}`);
+      }
+      const result = await res.json();
+      llmResponse = result.value?.text || result.value || "";
+    } catch (e: any) {
+      console.error("[subagent] LLM call failed:", e.message);
+      finalText = `Error: ${e.message}`;
+      break;
+    }
+
+    // Parse JSON response
+    let action: { thinking?: string; code?: string; response?: string } = {};
+    try {
+      const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        action = JSON.parse(jsonMatch[0]);
+      }
+    } catch {
+      // Try to extract code block directly
+      const codeMatch = llmResponse.match(/```(?:typescript|ts)?\s*([\s\S]*?)```/);
+      if (codeMatch) {
+        action = { code: codeMatch[1].trim() };
+      }
+    }
+
+    // Emit thinking progress
+    if (action.thinking && onProgress) {
+      await onProgress({
+        id: `step_${step}_thinking`,
+        type: "thinking",
+        label: action.thinking.slice(0, 150),
+        status: "complete",
+      });
+    }
+
+    // Check if done
+    if (action.response && !action.code) {
+      finalText = action.response;
+      break;
+    }
+
+    // Execute code
+    if (action.code && action.code.trim()) {
+      if (onProgress) {
+        await onProgress({
+          id: `step_${step}_code`,
+          type: "tool",
+          label: "Executing code...",
+          status: "active",
+        });
+      }
+
+      try {
+        const execResult = await ctx.runAction(internal.nodeActions.codeExec.execute, {
+          code: action.code,
+          timeoutMs: 60_000,
+          env: {
+            LOCAL_CONVEX_URL: "http://localhost:3210",
+          },
+        });
+
+        allExecutions.push({
+          code: action.code,
+          output: execResult.output,
+          success: execResult.success,
+        });
+
+        // Add to conversation
+        messages.push({
+          role: "assistant",
+          content: `Thinking: ${action.thinking || "..."}\n\n\`\`\`typescript\n${action.code}\n\`\`\``,
+        });
+        messages.push({
+          role: "user",
+          content: `Execution ${execResult.success ? "succeeded" : "failed"}:\n${execResult.output}\n\nContinue with JSON response.`,
+        });
+
+        if (onProgress) {
+          await onProgress({
+            id: `step_${step}_result`,
+            type: execResult.success ? "complete" : "error",
+            label: execResult.output.slice(0, 150),
+            status: execResult.success ? "complete" : "error",
+          });
+        }
+      } catch (e: any) {
+        allExecutions.push({
+          code: action.code,
+          output: e.message,
+          success: false,
+        });
+        messages.push({
+          role: "user",
+          content: `Execution error: ${e.message}\n\nTry a different approach.`,
+        });
+      }
+    } else if (!action.response) {
+      // No code and no response - try to continue
+      messages.push({
+        role: "user",
+        content: "Please provide either code to execute or a final response.",
+      });
+    }
+  }
+
+  return { text: finalText || "Subagent completed.", codeExecutions: allExecutions };
 }
 
 /**
@@ -369,11 +476,10 @@ Guidelines:
         );
       };
 
-      const result = await runSubagentLoopWithProgress(
+      const result = await runSubagentCodeExecLoop(
         ctx,
         systemPrompt,
         args.task,
-        args.tools,
         args.model || DEFAULT_SUBAGENT_MODEL,
         5,
         onProgress
@@ -385,7 +491,7 @@ Guidelines:
         status: "completed",
         result: {
           text: result.text,
-          toolCalls: result.toolCalls,
+          codeExecutions: result.codeExecutions,
         },
       });
 
