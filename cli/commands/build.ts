@@ -210,7 +210,7 @@ ENV CONVEX_LOCAL_STORAGE="/home/user/.convex/convex-backend-state/lakitu"
 USER user
 
 # Install patchright in lakitu project for dynamic imports from KSA context
-RUN cd /home/user/lakitu && bun add patchright
+RUN cd /home/user/lakitu && /home/user/.bun/bin/bun add patchright
 
 WORKDIR /home/user/workspace
 `;
