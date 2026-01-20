@@ -182,10 +182,10 @@ COPY --chown=user:user start.sh /home/user/start.sh
 RUN chmod +x /home/user/start.sh && \\
     cd /home/user/lakitu && /home/user/.bun/bin/bun install
 
-# Python Playwright + curl_cffi for FlareSolverr bot bypass
-RUN pip3 install playwright curl_cffi && playwright install-deps chromium
+# Python: crawl4ai + camoufox + playwright for stealth scraping
+RUN pip3 install crawl4ai playwright camoufox curl_cffi && playwright install-deps chromium firefox
 USER user
-RUN playwright install chromium
+RUN playwright install chromium firefox && python3 -c "from camoufox.sync_api import Camoufox; print('camoufox ok')" || true
 USER root
 
 # Create CLI tools
