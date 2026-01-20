@@ -1,4 +1,8 @@
-# Agent Orchestration System
+# Agent Orchestration System (Lakitu Cloud Component)
+
+> **NOTE**: This folder is part of the `@lakitu/sdk` git submodule.
+> Changes here require: version bump → push → wait for npm → rebuild sandbox.
+> See `/submodules/lakitu-sdk/CLAUDE.md` for the complete workflow.
 
 This folder contains the agent orchestration layer that coordinates AI agents running in E2B sandboxes. It bridges the Jibe frontend with the Lakitu agent runtime.
 

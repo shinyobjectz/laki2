@@ -1,114 +1,136 @@
-# Lakitu - AI Instructions
+# Lakitu SDK - AI Agent Instructions
 
 > **AUDIENCE**: This document is for YOU, the AI agent (Claude Code, Cursor, etc.) working on this codebase.
 > Read this BEFORE writing any code.
 
-## Package Structure & Git Workflow
+---
 
-**Lakitu is a git submodule AND an npm package.** Understanding this is critical.
+## 🚨 CRITICAL: This Submodule is for PUBLISHING, Not Consuming
 
 ```
-project.social/
-├── packages/lakitu/          # ← Git SUBMODULE (separate repo)
-│   ├── .git/                 #   Has its own git history
-│   ├── package.json          #   Published as @lakitu/sdk
-│   └── .github/workflows/    #   Auto-publishes to npm
-└── .gitmodules               # ← References packages/lakitu
+┌─────────────────────────────────────────────────────────────────────────┐
+│  The submodule exists to PUBLISH changes to npm.                        │
+│  All RUNTIME usage must go through the npm package @lakitu/sdk          │
+│                                                                         │
+│  ✅ bunx @lakitu/sdk build --custom    (uses npm - CORRECT)            │
+│  ❌ bun ./cli/index.ts build --custom  (uses submodule - WRONG)        │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Git Workflow for Lakitu Changes
+### Why This Matters
 
+When you run commands from the submodule directly:
+- You're testing **uncommitted local code**, not what users will get
+- Changes may work locally but fail after npm publish
+- Sandbox builds use the **npm version**, not your local changes
+- You create a false sense of "it works"
+
+---
+
+## ✅ CORRECT Patterns
+
+### Running SDK Commands
 ```bash
-# 1. Make changes in packages/lakitu/
-cd packages/lakitu
-# edit files...
+# CORRECT - always use npm package
+bunx @lakitu/sdk build --custom
+npx @lakitu/sdk build --custom
 
-# 2. Commit to the SUBMODULE (not parent repo)
-git add -A
-git commit -m "feat: add new KSA"
+# WRONG - bypasses npm, uses local code
+bun ./cli/index.ts build --custom
+node dist/cli/index.js build --custom
+```
 
-# 3. Push SUBMODULE to its remote (triggers npm publish if version bumped)
-git push origin main
+### Making Changes to the SDK
+```bash
+# 1. Edit files in this submodule
+vim cli/commands/build.ts
 
-# 4. Go back to parent repo and update submodule reference
-cd ../..
-git add packages/lakitu
-git commit -m "chore: update lakitu submodule"
-git push
+# 2. Bump version in package.json (REQUIRED!)
+#    0.1.54 → 0.1.55
 
-# 5. Rebuild sandbox template to use new code
+# 3. Commit and push (triggers npm publish)
+git add -A && git commit -m "feat: description" && git push origin main
+
+# 4. WAIT for npm publish (DO NOT SKIP!)
+for i in {1..15}; do
+  ver=$(npm view @lakitu/sdk version 2>/dev/null)
+  echo "Check $i: $ver"
+  [ "$ver" = "0.1.55" ] && break
+  sleep 8
+done
+
+# 5. Now rebuild sandbox (uses npm version)
+cd /path/to/project.social
 bun sandbox:custom
+```
+
+---
+
+## ❌ ANTI-PATTERNS (Never Do These)
+
+| Anti-Pattern | Why It's Wrong | Correct Approach |
+|--------------|----------------|------------------|
+| `bun ./cli/index.ts ...` | Uses local code, not npm | `bunx @lakitu/sdk ...` |
+| Editing without version bump | npm won't publish | Always bump version |
+| Rebuilding before npm publish | Uses old npm version | Poll `npm view` first |
+| Using `bun link` | Creates confusing state | Use publish workflow |
+| Testing via submodule | Masks publish issues | Publish, then test |
+
+---
+
+## Package Structure
+
+```
+submodules/lakitu-sdk/          # ← You are here (git submodule)
+├── .git/                       #   Separate git history
+├── package.json                #   Published as @lakitu/sdk
+├── .github/workflows/          #   Auto-publishes to npm
+├── cli/                        #   CLI commands (build, etc.)
+├── ksa/                        #   Core KSA modules
+├── convex/                     #   Sandbox + Cloud Convex code
+└── template/                   #   E2B template builder
 ```
 
 ### NPM Publish Workflow
 
-The `@lakitu/sdk` package publishes automatically via GitHub Actions:
+GitHub Actions auto-publishes when:
+1. Push to `main` branch
+2. `package.json` version changed
 
-1. **Trigger**: Push to `packages/lakitu` with version bump in `package.json`
-2. **Action**: `.github/workflows/publish.yml` builds and publishes
-3. **Check**: `npm view @lakitu/sdk version` to verify
-
-To bump version:
-```bash
-cd packages/lakitu
-# Edit package.json version (e.g., 0.1.17 → 0.1.18)
-git add package.json && git commit -m "chore: bump version"
-git push origin main  # Triggers npm publish
+```yaml
+# .github/workflows/publish.yml logic
+if [ "$CURRENT" != "$NEW" ]; then npm publish; fi
 ```
 
-### Dogfooding in project.social
-
-The parent app uses `@lakitu/sdk` from npm (not the local submodule) for CLI commands:
-
-```json
-// package.json scripts
-"sandbox": "npx @lakitu/sdk -- build",
-"sandbox:base": "npx @lakitu/sdk -- build --base",
-"sandbox:custom": "npx @lakitu/sdk -- build --custom"
-```
-
-This ensures we're always using the published version, catching issues before users do.
+**No version bump = No publish!**
 
 ---
 
-## ⚠️ CRITICAL: Sandbox Rebuild Required After Changes
+## Sandbox Rebuild Requirements
 
-**Any changes to KSA files require a sandbox rebuild!**
+The agent runs inside an E2B sandbox template built from the **npm package**, not the local submodule.
 
-The agent code runs inside an E2B sandbox template. Your changes are NOT automatically deployed - you must rebuild the template for changes to take effect.
+### TWO KSA Locations
 
-### TWO KSA Locations (IMPORTANT!)
+| Location | Purpose | Rebuild Process |
+|----------|---------|-----------------|
+| **`/project.social/lakitu/*.ts`** | Project KSAs (canvas, stealth, etc.) | Edit → `bun sandbox:custom` |
+| `submodules/lakitu-sdk/ksa/*.ts` | SDK KSAs (file, browser) | Edit → bump version → push → wait for npm → `bun sandbox:custom` |
 
-There are **TWO** places where KSAs are defined:
+### What Requires What
 
-| Location | Purpose | When to Use |
-|----------|---------|-------------|
-| **`/project.social/lakitu/*.ts`** | **Project-specific KSAs** - canvas, context, history, brandLibrary, etc. | Most new KSAs go here |
-| `packages/lakitu/ksa/*.ts` | Core SDK KSAs - file, browser (shared across projects) | Rarely - only for SDK-level changes |
+| Change | Version Bump? | Wait for npm? | Rebuild? |
+|--------|---------------|---------------|----------|
+| Project KSA (`/lakitu/*.ts`) | No | No | Yes |
+| SDK KSA (`ksa/*.ts`) | **YES** | **YES** | Yes |
+| CLI command (`cli/*.ts`) | **YES** | **YES** | Yes |
+| Template builder (`template/*.ts`) | **YES** | **YES** | Yes |
 
-**Both locations are merged into the sandbox at build time.** The build script copies project KSAs into the sandbox alongside SDK KSAs.
+### Common Mistakes
 
-### Files That Require Rebuild
-
-| Path | What It Contains |
-|------|------------------|
-| `/project.social/lakitu/*.ts` | **Project KSAs** (canvas, context, history, brands, etc.) |
-| `packages/lakitu/ksa/*.ts` | SDK KSAs (file, browser) |
-| `packages/lakitu/ksa/_shared/*.ts` | Gateway, config readers |
-| `packages/lakitu/runtime/*.ts` | CLI commands |
-| `packages/lakitu/template/*.ts` | Template builder |
-| `packages/lakitu/loro/*.ts` | CRDT utilities (LoroFS, LoroBeads) |
-
-### Rebuild Commands
-
-```bash
-bun sandbox:custom       # Quick rebuild (~1 min) - USE THIS for KSA changes
-bun sandbox              # Full rebuild (~5 min) - only if base dependencies changed
-```
-
-### Common Mistake
-
-You edit a KSA file but forget to rebuild. The agent continues using the OLD code and your fix doesn't work. **Always rebuild after changes!**
+1. **Editing SDK files without version bump** → npm doesn't publish → sandbox uses old code
+2. **Not waiting for npm publish** → `bun sandbox:custom` downloads old version
+3. **Testing via submodule** → Works locally but fails in production
 
 ---
 
@@ -311,32 +333,70 @@ await llm.chat({ tools: [...] });
 
 | Task | Do This | NOT This |
 |------|---------|----------|
-| Add capability | `ksa/mycap.ts` with export function | `convex/tools/` with tool() |
-| Add CLI command | `runtime/cmd` + bash | New tool() definition |
-| Add CRDT util | `loro/mycap.ts` | Separate package |
-| Update submodule | `cd packages/lakitu && git commit && git push` | Edit from parent |
-| Bump version | Edit `package.json` version, push | Manual npm publish |
-| Rebuild sandbox | `bun sandbox:custom` from project root | Forget to rebuild |
+| Run SDK command | `bunx @lakitu/sdk <cmd>` | `bun ./cli/index.ts <cmd>` |
+| Add project KSA | `/lakitu/mycap.ts` → rebuild | Add to this submodule |
+| Add SDK KSA | `ksa/mycap.ts` → bump → push → wait → rebuild | Forget version bump |
+| Test changes | Publish to npm first, then test | Test via submodule |
+| Rebuild sandbox | `bun sandbox:custom` (from project root) | Rebuild before npm publishes |
 
-## Common Operations
+## SDK Change Workflow (Complete)
 
 ```bash
-# Check current npm version
+# ═══════════════════════════════════════════════════════════════
+# 1. Make changes
+# ═══════════════════════════════════════════════════════════════
+cd submodules/lakitu-sdk
+vim ksa/somefile.ts  # or cli/, template/, etc.
+
+# ═══════════════════════════════════════════════════════════════
+# 2. Bump version (REQUIRED!)
+# ═══════════════════════════════════════════════════════════════
+# Edit package.json: "version": "X.Y.Z" → "X.Y.Z+1"
+
+# ═══════════════════════════════════════════════════════════════
+# 3. Commit and push (triggers npm publish)
+# ═══════════════════════════════════════════════════════════════
+git add -A && git commit -m "feat: description" && git push origin main
+
+# ═══════════════════════════════════════════════════════════════
+# 4. WAIT for npm publish (DO NOT SKIP!)
+# ═══════════════════════════════════════════════════════════════
+for i in {1..15}; do
+  ver=$(npm view @lakitu/sdk version 2>/dev/null)
+  echo "Check $i: $ver"
+  [ "$ver" = "NEW_VERSION" ] && echo "✅ Published!" && break
+  sleep 8
+done
+
+# ═══════════════════════════════════════════════════════════════
+# 5. Update parent repo
+# ═══════════════════════════════════════════════════════════════
+cd ../..
+git add submodules/lakitu-sdk
+git commit -m "chore: update lakitu-sdk to vX.Y.Z"
+git push
+
+# ═══════════════════════════════════════════════════════════════
+# 6. Rebuild sandbox (now uses npm version)
+# ═══════════════════════════════════════════════════════════════
+bun sandbox:custom
+```
+
+## Verification Commands
+
+```bash
+# Check published npm version
 npm view @lakitu/sdk version
 
-# See what's in the submodule
-cd packages/lakitu && git log --oneline -5
+# Check local submodule version
+cat package.json | grep '"version"'
 
-# Update submodule to latest
-cd packages/lakitu && git pull origin main
-cd ../.. && git add packages/lakitu && git commit -m "chore: update lakitu"
-
-# Rebuild sandbox after changes
-bun sandbox:custom
+# Verify sandbox uses correct version (check build logs)
+bun sandbox:custom 2>&1 | grep -i "lakitu"
 ```
 
 ## See Also
 
 - `ksa/README.md` - KSA documentation and examples
-- `loro/index.ts` - CRDT exports (LoroFS, LoroBeads)
 - `.github/workflows/publish.yml` - NPM publish automation
+- `/project.social/AGENTS.md` - Full project documentation
