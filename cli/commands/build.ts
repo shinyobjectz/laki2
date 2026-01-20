@@ -190,7 +190,7 @@ RUN pip3 install playwright markitdown
 # https://github.com/Kaliiiiiiiiii-Vinyzu/patchright
 # Install globally AND in lakitu project so dynamic imports work from KSA context
 RUN npm install -g patchright && npx patchright install chrome && \
-    cd /home/user/lakitu && bun add patchright
+    cd /home/user/lakitu && /home/user/.bun/bin/bun add patchright
 
 # Create CLI tools (must be root)
 RUN printf '#!/bin/bash\\nbun run /home/user/lakitu/runtime/pdf/pdf-generator.ts "$$@"\\n' > /usr/local/bin/generate-pdf && chmod +x /usr/local/bin/generate-pdf
