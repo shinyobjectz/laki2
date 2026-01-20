@@ -45,10 +45,20 @@ program
   .option("--alias <name>", "Template alias", "lakitu")
   .action(publish);
 
-program
-  .command("cloudflare <command>")
-  .description("Manage Cloudflare workers and R2")
+const cfCmd = program
+  .command("cloudflare")
+  .description("Manage Cloudflare workers and R2");
+
+cfCmd
+  .command("init")
+  .description("Initialize Cloudflare worker configuration")
   .option("-p, --project <path>", "Project directory")
-  .action(cloudflare);
+  .action((options) => cloudflare("init", options));
+
+cfCmd
+  .command("deploy")
+  .description("Deploy workers to Cloudflare")
+  .option("-p, --project <path>", "Project directory")
+  .action((options) => cloudflare("deploy", options));
 
 program.parse();
