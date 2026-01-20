@@ -178,15 +178,12 @@ COPY --chown=user:user start.sh /home/user/start.sh
 RUN chmod +x /home/user/start.sh && \\
     cd /home/user/lakitu && /home/user/.bun/bin/bun install
 
-# Python: crawl4ai + camoufox + playwright for stealth scraping (v2 - force cache bust)
-# Combined step to ensure camoufox browser binary is pre-downloaded
-RUN pip3 install crawl4ai playwright "camoufox[geoip]>=0.4" curl_cffi && \\
-    playwright install-deps chromium firefox
+# Python: Lightweight Playwright for JS rendering (no heavy camoufox)
+# Bot-protected sites use cloud-side FlareSolverr via gateway
+RUN pip3 install playwright markitdown && playwright install-deps chromium
 USER user
-# Pre-download both Playwright browsers AND Camoufox browser (713MB) in one layer
-RUN playwright install chromium firefox && \\
-    python3 -c "import camoufox; camoufox.fetch_firefox(); print('camoufox fetched')" && \\
-    ls -la ~/.cache/camoufox/ || echo "checking cache"
+# Only install Chromium (lightweight, ~300MB vs 713MB for camoufox)
+RUN playwright install chromium
 USER root
 
 # Create CLI tools
