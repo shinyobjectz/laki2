@@ -18,7 +18,7 @@ import { internal } from "../_generated/api";
 import { wrapCodeForExecution, extractCodeBlocks } from "../utils/codeExecHelpers";
 import type { ChainOfThoughtStep, StepStatus } from "../../../shared/chain-of-thought";
 import { createStepId } from "../../../shared/chain-of-thought";
-import { MODEL_PRESETS, resolveModel, type ModelPreset } from "../../cloud/models";
+import { MODEL_PRESETS, resolveModel, type ModelPreset } from "../../../shared/models";
 
 // Default model preset for code execution loop
 // Actual model resolved via MODEL_PRESETS or custom config
