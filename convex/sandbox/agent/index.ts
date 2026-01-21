@@ -11,7 +11,7 @@
  * 4. Response returns through the chain
  */
 
-import { action, internalAction, query, mutation } from "../_generated/server";
+import { action, query, mutation } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { v } from "convex/values";
 import type { ChainOfThoughtStep, StepStatus } from "../../../shared/chain-of-thought";
@@ -68,7 +68,7 @@ interface GatewayConfig {
   jwt: string;
 }
 
-// Module-level gateway config (set by startThread/continueThread)
+// Module-level gateway config (set by startCodeExecThread)
 let gatewayConfig: GatewayConfig | null = null;
 
 // Module-level chain-of-thought steps for real-time UI (in-memory per sandbox session)
@@ -105,7 +105,7 @@ function createToolStep(
   status: StepStatus
 ): Omit<ChainOfThoughtStep, "id" | "timestamp"> {
   const stepType = getStepTypeForTool(toolName);
-  
+
   switch (stepType) {
     case "search": {
       // Extract URLs from search results
@@ -123,14 +123,14 @@ function createToolStep(
         results: urls.length > 0 ? urls : undefined,
       };
     }
-    
+
     case "browser": {
       const action = toolName.replace("browser_", "") as any;
       return {
         type: "browser",
         status,
         action: action === "open" ? "navigate" : action,
-        label: toolName === "browser_open" 
+        label: toolName === "browser_open"
           ? `Navigating to ${(args as any).url}`
           : toolName === "browser_screenshot"
           ? "Taking screenshot"
@@ -139,9 +139,9 @@ function createToolStep(
         screenshot: toolName === "browser_screenshot" ? (result as any)?.screenshot : undefined,
       };
     }
-    
+
     case "file": {
-      const operation = toolName.includes("read") ? "read" 
+      const operation = toolName.includes("read") ? "read"
         : toolName.includes("edit") ? "edit"
         : toolName.includes("pdf") ? "save"
         : "write";
@@ -156,7 +156,7 @@ function createToolStep(
           : `Saving ${path}`,
       };
     }
-    
+
     default:
       return {
         type: "tool",
@@ -307,83 +307,6 @@ function createThreadId(): string {
 }
 
 // ============================================
-// Legacy Tool Execution Loop (DEPRECATED)
-// ============================================
-
-/**
- * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
- */
-async function runAgentLoop(
-  _ctx: any,
-  _systemPrompt: string,
-  _userPrompt: string,
-  _maxSteps: number = 10,
-  _threadId?: string
-): Promise<{ text: string; toolCalls: ToolCall[] }> {
-  throw new Error(
-    "Legacy tool calling mode is deprecated. Use startCodeExecThread instead, " +
-    "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
-  );
-}
-
-// ============================================
-// Agent Actions
-// ============================================
-
-/**
- * Start a new agent thread
- * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
- */
-export const startThread = action({
-  args: {
-    prompt: v.string(),
-    context: v.optional(v.any()),
-  },
-  handler: async (_ctx, _args): Promise<AgentResult> => {
-    throw new Error(
-      "startThread is deprecated. Use startCodeExecThread instead, " +
-      "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
-    );
-  },
-});
-
-/**
- * Continue an existing thread
- * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
- */
-export const continueThread = action({
-  args: {
-    threadId: v.string(),
-    prompt: v.string(),
-  },
-  handler: async (_ctx, _args): Promise<AgentResult> => {
-    throw new Error(
-      "continueThread is deprecated. Use startCodeExecThread instead, " +
-      "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
-    );
-  },
-});
-
-/**
- * Run agent with timeout for chained execution
- * @deprecated Use startCodeExecThread instead. Legacy JSON tool calling is no longer supported.
- */
-export const runWithTimeout = internalAction({
-  args: {
-    prompt: v.string(),
-    context: v.optional(v.any()),
-    timeoutMs: v.number(),
-    checkpointId: v.optional(v.id("checkpoints")),
-  },
-  handler: async (_ctx, _args) => {
-    throw new Error(
-      "runWithTimeout is deprecated. Use startCodeExecThread instead, " +
-      "which uses the new KSA (Knowledge, Skills, Abilities) architecture with code execution."
-    );
-  },
-});
-
-// ============================================
 // Queries
 // ============================================
 
@@ -412,7 +335,7 @@ export const getChainOfThoughtSteps = query({
 });
 
 // ============================================
-// Code Execution Mode (NEW ARCHITECTURE)
+// Code Execution Mode
 // ============================================
 
 import { runCodeExecLoop, getSteps } from "./codeExecLoop";
@@ -421,12 +344,10 @@ import { getCodeExecSystemPrompt, generateKSAInstructions } from "../prompts/cod
 /**
  * Start a thread using code execution mode.
  *
- * This is the NEW architecture:
+ * This is the primary agent entry point:
  * - LLM generates TypeScript code
- * - Code imports from skills/ and executes
+ * - Code imports from KSA modules and executes
  * - No JSON tool calls
- *
- * Use this instead of startThread for the new code execution model.
  */
 export const startCodeExecThread = action({
   args: {

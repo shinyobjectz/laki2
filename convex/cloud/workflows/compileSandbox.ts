@@ -1,6 +1,6 @@
 /**
  * Sandbox Compiler
- * 
+ *
  * Manages compilation manifest for sandbox definitions.
  */
 
@@ -27,11 +27,11 @@ export const saveManifest = internalMutation({
       .query("compiledSandbox")
       .withIndex("by_version", (q) => q.eq("version", args.version))
       .collect();
-    
+
     for (const entry of existing) {
       await ctx.db.delete(entry._id);
     }
-    
+
     // Insert new entries
     for (const item of args.manifest) {
       await ctx.db.insert("compiledSandbox", {
@@ -43,7 +43,7 @@ export const saveManifest = internalMutation({
         createdAt: Date.now(),
       });
     }
-    
+
     return { saved: args.manifest.length };
   },
 });
@@ -60,15 +60,15 @@ export const getManifest = query({
         .withIndex("by_version", (q) => q.eq("version", args.version!))
         .collect();
     }
-    
+
     // Get latest version
     const latest = await ctx.db
       .query("compiledSandbox")
       .order("desc")
       .first();
-    
+
     if (!latest) return [];
-    
+
     return await ctx.db
       .query("compiledSandbox")
       .withIndex("by_version", (q) => q.eq("version", latest.version))
@@ -84,7 +84,7 @@ export const getLatestVersion = query({
       .query("compiledSandbox")
       .order("desc")
       .first();
-    
+
     return latest?.version ?? null;
   },
 });
@@ -112,35 +112,7 @@ export const getToolImplementation = query({
       .query("customTools")
       .withIndex("by_toolId", (q) => q.eq("toolId", args.toolId))
       .first();
-    
+
     return tool?.implementation || null;
   },
-});
-
-// ============================================
-// Built-in Metadata Queries (deprecated - metadata now in Lakitu)
-// ============================================
-
-/** Get all built-in tool metadata */
-export const getBuiltInTools = query({
-  args: {},
-  handler: async () => [],
-});
-
-/** Get all built-in skill metadata */
-export const getBuiltInSkills = query({
-  args: {},
-  handler: async () => [],
-});
-
-/** Get all built-in deliverable metadata */
-export const getBuiltInDeliverables = query({
-  args: {},
-  handler: async () => [],
-});
-
-/** Get all agent definitions */
-export const getAgents = query({
-  args: {},
-  handler: async () => [],
 });

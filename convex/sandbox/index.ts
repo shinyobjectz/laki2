@@ -8,11 +8,10 @@
 // Agent
 // ============================================
 export {
-  startThread,
-  continueThread,
-  runWithTimeout,
+  startCodeExecThread,
   getThreadMessages,
   getStreamDeltas,
+  getChainOfThoughtSteps,
 } from "./agent";
 export * as decisions from "./agent/decisions";
 
@@ -37,12 +36,6 @@ export * as sync from "./planning/sync";
 // ============================================
 export * as context from "./context";
 export * as session from "./context/session";
-
-// ============================================
-// Tools (DEPRECATED - Use KSAs instead)
-// ============================================
-// Legacy tool system has been removed. Use the KSA (Knowledge, Skills, Abilities)
-// architecture with code execution mode instead. See packages/lakitu/ksa/
 
 // ============================================
 // Prompts

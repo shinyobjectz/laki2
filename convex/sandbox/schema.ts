@@ -476,7 +476,7 @@ export default defineSchema({
     .index("by_thread", ["threadId"]),
 
   // ============================================
-  // Sync Queue - Items to sync to cloud
+  // Sync Queue - Items to sync to cloud (legacy)
   // ============================================
 
   syncQueue: defineTable({
@@ -507,4 +507,135 @@ export default defineSchema({
   })
     .index("by_status", ["status"])
     .index("by_type", ["type"]),
+
+  // ============================================
+  // Sync Outbox - Transactional outbox for cloud sync
+  // ============================================
+  // Records all local writes that need to sync to cloud.
+  // Uses idempotency keys for at-least-once delivery without duplicates.
+
+  syncOutbox: defineTable({
+    // Idempotency key - UUID generated at write time, ensures no duplicates
+    idempotencyKey: v.string(),
+
+    // Entity reference
+    entityType: v.string(),  // "brands.products", "brands.assets", "artifacts", etc.
+    entityId: v.string(),    // Local ID of the entity
+
+    // Operation
+    operation: v.union(
+      v.literal("create"),
+      v.literal("update"),
+      v.literal("delete"),
+      v.literal("upsert")
+    ),
+
+    // Payload to send to cloud
+    payload: v.any(),
+
+    // Cloud target (gateway path)
+    cloudPath: v.string(),  // e.g., "features.brands.core.products.saveProducts"
+
+    // Status tracking
+    status: v.union(
+      v.literal("pending"),
+      v.literal("syncing"),
+      v.literal("synced"),
+      v.literal("failed"),
+      v.literal("skipped")
+    ),
+
+    // Retry tracking
+    attempts: v.number(),
+    maxAttempts: v.number(),
+    lastAttemptAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+
+    // Result tracking
+    cloudId: v.optional(v.string()),  // ID returned from cloud
+    syncedAt: v.optional(v.number()),
+
+    // Metadata
+    priority: v.number(),  // 0=highest, 10=lowest
+    createdAt: v.number(),
+    sessionId: v.optional(v.string()),
+    threadId: v.optional(v.string()),
+  })
+    .index("by_status", ["status"])
+    .index("by_idempotency", ["idempotencyKey"])
+    .index("by_entity", ["entityType", "entityId"])
+    .index("by_session", ["sessionId", "status"])
+    .index("by_priority", ["status", "priority", "createdAt"]),
+
+  // ============================================
+  // Marketing Copy - Extracted marketing content
+  // ============================================
+
+  discoveredMarketingCopy: defineTable({
+    domain: v.string(),
+    sourceUrl: v.string(),
+    copyType: v.union(
+      v.literal("headline"),
+      v.literal("tagline"),
+      v.literal("value_prop"),
+      v.literal("cta"),
+      v.literal("testimonial"),
+      v.literal("feature_description"),
+      v.literal("other")
+    ),
+    content: v.string(),
+    context: v.optional(v.string()),
+    extractedAt: v.number(),
+    threadId: v.optional(v.string()),
+    syncedToCloud: v.boolean(),
+  })
+    .index("by_domain", ["domain"])
+    .index("by_type", ["copyType"])
+    .index("by_synced", ["syncedToCloud"]),
+
+  // ============================================
+  // Services - Extracted service offerings
+  // ============================================
+
+  discoveredServices: defineTable({
+    domain: v.string(),
+    sourceUrl: v.string(),
+    name: v.string(),
+    serviceType: v.union(
+      v.literal("consulting"),
+      v.literal("implementation"),
+      v.literal("support"),
+      v.literal("training"),
+      v.literal("managed_service"),
+      v.literal("professional_service"),
+      v.literal("other")
+    ),
+    description: v.optional(v.string()),
+    pricing: v.optional(v.string()),
+    extractedAt: v.number(),
+    threadId: v.optional(v.string()),
+    syncedToCloud: v.boolean(),
+  })
+    .index("by_domain", ["domain"])
+    .index("by_type", ["serviceType"])
+    .index("by_synced", ["syncedToCloud"]),
+
+  // ============================================
+  // Reviews - Extracted reviews/testimonials
+  // ============================================
+
+  discoveredReviews: defineTable({
+    domain: v.string(),
+    sourceUrl: v.string(),
+    reviewerName: v.optional(v.string()),
+    rating: v.optional(v.number()),
+    content: v.string(),
+    date: v.optional(v.string()),
+    platform: v.optional(v.string()),
+    extractedAt: v.number(),
+    threadId: v.optional(v.string()),
+    syncedToCloud: v.boolean(),
+  })
+    .index("by_domain", ["domain"])
+    .index("by_synced", ["syncedToCloud"]),
 });

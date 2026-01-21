@@ -280,7 +280,7 @@ const customTemplate = (baseId: string, buildDir: string, config: TemplateConfig
   if (aptPackages.length > 0 || pipPackages.length > 0 || npmPackages.length > 0) {
     console.log("Installing custom packages from template config...");
     const installCmds: string[] = [];
-    
+
     if (aptPackages.length > 0) {
       console.log(`  APT: ${aptPackages.join(", ")}`);
       installCmds.push(generateAptInstall(aptPackages));
@@ -396,20 +396,27 @@ async function buildCustom(baseId = "lakitu-base") {
     ${LAKITU_DIR}/ ${BUILD_DIR}/lakitu/`.quiet();
   await $`cp ${import.meta.dir}/e2b/start.sh ${BUILD_DIR}/`;
 
-  // Copy project-specific KSAs from convex/lakitu/ksa/ (new location) or lakitu/ (legacy)
-  const NEW_KSA_DIR = `${LAKITU_DIR}/../../convex/lakitu/ksa`;
-  const LEGACY_KSA_DIR = `${LAKITU_DIR}/../../lakitu`;
+  // Copy project-specific KSAs
+  // Supported paths (checked in order):
+  //   1. convex/lakitu/ksa/ - Alternative location (colocated with convex backend)
+  //   2. lakitu/           - Standard location for project.social (27 KSA modules)
+  //
+  // Note: project.social uses lakitu/ at the project root as its standard KSA location.
+  // The convex/lakitu/ksa/ path is supported for projects that prefer colocating KSAs
+  // with their Convex backend code.
+  const ALT_KSA_DIR = `${LAKITU_DIR}/../../convex/lakitu/ksa`;
+  const STANDARD_KSA_DIR = `${LAKITU_DIR}/../../lakitu`;
   await $`mkdir -p ${BUILD_DIR}/project-ksa`.quiet();
-  
-  // Try new location first, fall back to legacy
+
+  // Try alternative location first (convex/lakitu/ksa/), fall back to standard (lakitu/)
   try {
-    await $`test -d ${NEW_KSA_DIR}`.quiet();
-    await $`cp -r ${NEW_KSA_DIR}/* ${BUILD_DIR}/project-ksa/`.quiet();
+    await $`test -d ${ALT_KSA_DIR}`.quiet();
+    await $`cp -r ${ALT_KSA_DIR}/* ${BUILD_DIR}/project-ksa/`.quiet();
     console.log("Copied project KSAs from convex/lakitu/ksa/");
   } catch {
     try {
-      await $`cp -r ${LEGACY_KSA_DIR}/* ${BUILD_DIR}/project-ksa/`.quiet();
-      console.log("Copied project KSAs from lakitu/ (legacy location)");
+      await $`cp -r ${STANDARD_KSA_DIR}/* ${BUILD_DIR}/project-ksa/`.quiet();
+      console.log("Copied project KSAs from lakitu/");
     } catch {
       console.log("No project KSAs found");
     }
