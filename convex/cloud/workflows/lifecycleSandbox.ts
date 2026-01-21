@@ -1,4 +1,35 @@
 /**
+ * @deprecated LEGACY - Use sandboxConvex.ts instead
+ *
+ * This file is DEPRECATED as of 2026-01-21.
+ * The replacement is: sandboxConvex.ts (self-hosted Convex backend)
+ *
+ * WHY DEPRECATED:
+ * - Uses E2B gRPC which times out after 50-60s in Convex actions
+ * - Requires OpenCode HTTP server + event forwarder workarounds
+ * - Complex polling logic to work around gRPC timeout issues
+ *
+ * WHY NOT DELETED:
+ * - Gateway falls back to lifecycleSandbox.getSession for legacy sessions
+ * - Frontend subscribes to both session types for backward compatibility
+ * - Existing sessions may still reference this module
+ *
+ * MIGRATION:
+ * - New code should use sandboxConvex.ts exclusively
+ * - This file will be removed once all legacy sessions have completed
+ *
+ * KEY DIFFERENCES (sandboxConvex.ts):
+ * - Uses self-hosted Convex backend instead of OpenCode
+ * - Native Convex streaming (no SSE/event forwarder)
+ * - Direct Convex client communication
+ * - Simpler architecture without gRPC timeout workarounds
+ * - Checkpoint-based chaining for long tasks
+ *
+ * @see sandboxConvex.ts for the modern implementation
+ * ============================================================================
+ *
+ * ORIGINAL DOCUMENTATION (preserved for reference):
+ *
  * Sandbox Lifecycle - E2B sandbox spawn and session management
  *
  * NON-BLOCKING flow (avoids E2B gRPC stream timeout):
@@ -81,23 +112,23 @@ function createMetrics(): TimingMetrics {
 function recordStep(metrics: TimingMetrics, name: string, startMs: number): void {
   const durationMs = Date.now() - startMs;
   metrics.steps.push({ name, startMs: startMs - metrics.startTime, durationMs });
-  console.log(`⏱️ [${name}] ${durationMs}ms`);
+  console.log(`[DEPRECATED:lifecycleSandbox] [${name}] ${durationMs}ms`);
 }
 
 function formatMetrics(metrics: TimingMetrics): string {
   const totalDuration = Date.now() - metrics.startTime;
   const lines = [
-    `\n📊 TIMING REPORT (total: ${(totalDuration / 1000).toFixed(1)}s)`,
-    "─".repeat(50),
+    `\n[DEPRECATED:lifecycleSandbox] TIMING REPORT (total: ${(totalDuration / 1000).toFixed(1)}s)`,
+    "-".repeat(50),
   ];
 
   for (const step of metrics.steps) {
     const pct = totalDuration > 0 ? ((step.durationMs / totalDuration) * 100).toFixed(1) : "0";
-    const bar = "█".repeat(Math.min(20, Math.round(step.durationMs / (totalDuration / 20))));
+    const bar = "=".repeat(Math.min(20, Math.round(step.durationMs / (totalDuration / 20))));
     lines.push(`${step.name.padEnd(25)} ${(step.durationMs / 1000).toFixed(2)}s ${bar} ${pct}%`);
   }
 
-  lines.push("─".repeat(50));
+  lines.push("-".repeat(50));
   return lines.join("\n");
 }
 
@@ -312,7 +343,7 @@ export const storeSessionMetrics = internalMutation({
     // Also log as a timing entry for visibility
     await ctx.db.insert("agentSessionLogs", {
       sessionId: args.sessionId,
-      message: `⏱️ SETUP: ${(args.metrics.setupMs / 1000).toFixed(1)}s (sandbox: ${(args.metrics.sandboxCreateMs / 1000).toFixed(1)}s, server: ${(args.metrics.serverStartupMs / 1000).toFixed(1)}s)`,
+      message: `[DEPRECATED] SETUP: ${(args.metrics.setupMs / 1000).toFixed(1)}s (sandbox: ${(args.metrics.sandboxCreateMs / 1000).toFixed(1)}s, server: ${(args.metrics.serverStartupMs / 1000).toFixed(1)}s)`,
       createdAt: Date.now(),
     });
   },
@@ -378,13 +409,13 @@ export const completeFromForwarder = mutation({
     );
 
     if (!session) {
-      console.log(`[completeFromForwarder] Session not found: ${args.sessionId}`);
+      console.log(`[DEPRECATED:completeFromForwarder] Session not found: ${args.sessionId}`);
       return { success: false, error: "Session not found" };
     }
 
     // Check if already completed
     if (session.status === "completed" || session.status === "failed") {
-      console.log(`[completeFromForwarder] Session already ${session.status}`);
+      console.log(`[DEPRECATED:completeFromForwarder] Session already ${session.status}`);
       return { success: true, alreadyComplete: true };
     }
 
@@ -403,11 +434,11 @@ export const completeFromForwarder = mutation({
     // Log completion
     await ctx.db.insert("agentSessionLogs", {
       sessionId: session._id,
-      message: `✅ Completed via event forwarder (${args.messagesCount} messages, ${args.toolCalls.length} tools)`,
+      message: `[DEPRECATED] Completed via event forwarder (${args.messagesCount} messages, ${args.toolCalls.length} tools)`,
       createdAt: Date.now(),
     });
 
-    console.log(`[completeFromForwarder] ✅ Session ${session._id} completed`);
+    console.log(`[DEPRECATED:completeFromForwarder] Session ${session._id} completed`);
 
     // Kill the sandbox (schedule async to not block)
     // The polling action will notice the session is complete and skip processing
@@ -442,6 +473,7 @@ export const markSessionRunning = internalMutation({
 export const startSession = action({
   args: { projectId: v.string(), prompt: v.string(), config: v.optional(v.any()) },
   handler: async (ctx, args) => {
+    console.warn("[DEPRECATED] lifecycleSandbox.startSession is deprecated. Use sandboxConvex.startSession instead.");
     if (args.config?.cardId) {
       const existing = await ctx.runQuery(api.workflows.lifecycleSandbox.getActiveSessionForCard, {
         cardId: args.config.cardId.toString(),
@@ -492,6 +524,7 @@ export const spawnSandbox = action({
     maxTokens: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    console.warn("[DEPRECATED] lifecycleSandbox.spawnSandbox is deprecated. Use sandboxConvex instead.");
     let fullPrompt = args.prompt;
     if (args.systemPrompt) {
       fullPrompt = `${args.systemPrompt}\n\n${args.prompt}`;
@@ -513,7 +546,7 @@ export const spawnSandbox = action({
     // Check if we're in polling mode (non-blocking)
     // If so, DON'T return output so runAgentStep uses the async DB polling path
     if ((result as any).status === "polling") {
-      console.log(`[spawnSandbox] Sandbox started in polling mode for session ${args.sessionId}`);
+      console.log(`[DEPRECATED:spawnSandbox] Sandbox started in polling mode for session ${args.sessionId}`);
       return {
         sessionId: args.sessionId,
         polling: true, // Indicator for caller
@@ -557,6 +590,7 @@ export const runSandbox = internalAction({
     })),
   },
   handler: async (ctx, args) => {
+    console.warn("[DEPRECATED] lifecycleSandbox.runSandbox is deprecated. Use sandboxConvex.runConvexSandbox instead.");
     // Get agent config from args (unified settings) or use defaults
     const agentConfig = getAgentConfig(args.modelConfig);
     // Helper to restore previous stage state (VFS + Beads)
@@ -578,7 +612,7 @@ export const runSandbox = internalAction({
 
         // 2. Write artifacts to sandbox VFS
         if (artifacts && artifacts.length > 0) {
-          console.log(`[Sandbox] 📂 Restoring ${artifacts.length} files from previous stages...`);
+          console.log(`[DEPRECATED:Sandbox] Restoring ${artifacts.length} files from previous stages...`);
 
           for (const artifact of artifacts) {
             const targetPath = artifact.path?.startsWith('/home/user/workspace')
@@ -607,7 +641,7 @@ ARTIFACT_EOF`);
 
             filesRestored++;
           }
-          console.log(`[Sandbox] ✅ Restored ${filesRestored} files to VFS`);
+          console.log(`[DEPRECATED:Sandbox] Restored ${filesRestored} files to VFS`);
         }
 
         // 3. Get and restore Beads state
@@ -616,7 +650,7 @@ ARTIFACT_EOF`);
         });
 
         if (beadsState && beadsState.beadsState) {
-          console.log(`[Sandbox] 🧠 Restoring Beads state from previous stage...`);
+          console.log(`[DEPRECATED:Sandbox] Restoring Beads state from previous stage...`);
           const beadsJson = typeof beadsState.beadsState === 'string'
             ? beadsState.beadsState
             : JSON.stringify(beadsState.beadsState);
@@ -626,10 +660,10 @@ ARTIFACT_EOF`);
 ${beadsJson}
 BEADS_EOF`);
           beadsRestored = true;
-          console.log(`[Sandbox] ✅ Beads state restored`);
+          console.log(`[DEPRECATED:Sandbox] Beads state restored`);
         }
       } catch (e) {
-        console.warn(`[Sandbox] ⚠️ State restoration error (non-fatal): ${e}`);
+        console.warn(`[DEPRECATED:Sandbox] State restoration error (non-fatal): ${e}`);
       }
 
       recordStepFn(metricsFn, "state_restore", stepStart);
@@ -646,7 +680,7 @@ BEADS_EOF`);
 
     try {
       stepStart = Date.now();
-      // Generate JWT for sandbox → Convex callbacks
+      // Generate JWT for sandbox -> Convex callbacks
       const secret = process.env.SANDBOX_JWT_SECRET;
       if (!secret) throw new Error("SANDBOX_JWT_SECRET not configured");
 
@@ -690,7 +724,7 @@ BEADS_EOF`);
       if (args.cardId) {
         const restoreResult = await restorePreviousState(sandbox, args.cardId, recordStep, metrics);
         if (restoreResult.filesRestored > 0 || restoreResult.beadsRestored) {
-          console.log(`[Sandbox] 🔄 State restored: ${restoreResult.filesRestored} files, beads=${restoreResult.beadsRestored}`);
+          console.log(`[DEPRECATED:Sandbox] State restored: ${restoreResult.filesRestored} files, beads=${restoreResult.beadsRestored}`);
         }
       }
 
@@ -728,7 +762,7 @@ BEADS_EOF`);
       if (!serverReady) throw new Error("OpenCode server failed to start");
       recordStep(metrics, "server_startup", stepStart);
       metrics.totals.serverStartup = Date.now() - stepStart;
-      console.log(`⏱️ [server_startup] Ready after ${serverReadyLoops} polls (${((Date.now() - stepStart) / 1000).toFixed(2)}s)`);
+      console.log(`[DEPRECATED] [server_startup] Ready after ${serverReadyLoops} polls (${((Date.now() - stepStart) / 1000).toFixed(2)}s)`);
 
       // 4. Configure auth + create session IN PARALLEL
       stepStart = Date.now();
@@ -750,8 +784,8 @@ BEADS_EOF`);
         throw new Error(`Auth config failed: ${authRes.status} - ${authErr}`);
       }
       const authBody = await authRes.text();
-      console.log(`[Sandbox] Auth response: ${authBody.slice(0, 200)}`);
-      console.log(`[Sandbox] OpenRouter key present: ${!!process.env.OPENROUTER_API_KEY}, length: ${process.env.OPENROUTER_API_KEY?.length || 0}`);
+      console.log(`[DEPRECATED:Sandbox] Auth response: ${authBody.slice(0, 200)}`);
+      console.log(`[DEPRECATED:Sandbox] OpenRouter key present: ${!!process.env.OPENROUTER_API_KEY}, length: ${process.env.OPENROUTER_API_KEY?.length || 0}`);
       recordStep(metrics, "auth_config", stepStart);
       metrics.totals.authConfig = Date.now() - stepStart;
 
@@ -770,13 +804,13 @@ BEADS_EOF`);
       // Log prompt size for debugging latency issues
       const promptChars = fullPrompt.length;
       const estimatedTokens = Math.round(promptChars / 4); // ~4 chars per token estimate
-      console.log(`📝 [Prompt] ${promptChars} chars, ~${estimatedTokens} tokens estimated`);
+      console.log(`[DEPRECATED] [Prompt] ${promptChars} chars, ~${estimatedTokens} tokens estimated`);
 
       // 7. Update convex with session status
       stepStart = Date.now();
       const forwarderPath = "/home/user/scripts/event-forwarder.ts";
-      console.log(`[Sandbox] JWT length: ${jwt.length}, first 20 chars: ${jwt.slice(0, 20)}...`);
-      console.log(`[Sandbox] CONVEX_URL in sandbox: ${convexUrl}`);
+      console.log(`[DEPRECATED:Sandbox] JWT length: ${jwt.length}, first 20 chars: ${jwt.slice(0, 20)}...`);
+      console.log(`[DEPRECATED:Sandbox] CONVEX_URL in sandbox: ${convexUrl}`);
 
       await ctx.runMutation(internal.workflows.lifecycleSandbox.markSessionRunning, {
         sessionId: args.sessionId,
@@ -815,8 +849,8 @@ BEADS_EOF`);
         throw new Error(`Async message failed: ${asyncRes.status} ${errBody.slice(0, 200)}`);
       }
       const promptBody = await asyncRes.text();
-      console.log(`[Sandbox] Prompt response: ${promptBody.slice(0, 300)}`);
-      console.log(`[Sandbox] Model: ${agentConfig.primaryModel}, Provider: ${agentConfig.provider}`);
+      console.log(`[DEPRECATED:Sandbox] Prompt response: ${promptBody.slice(0, 300)}`);
+      console.log(`[DEPRECATED:Sandbox] Model: ${agentConfig.primaryModel}, Provider: ${agentConfig.provider}`);
       recordStep(metrics, "prompt_send", stepStart);
       metrics.totals.promptSend = Date.now() - stepStart;
 
@@ -828,14 +862,14 @@ BEADS_EOF`);
         { background: true }
       );
       recordStep(metrics, "event_forwarder", stepStart);
-      console.log(`[Sandbox] Started event forwarder for session ${openCodeSessionId}`);
+      console.log(`[DEPRECATED:Sandbox] Started event forwarder for session ${openCodeSessionId}`);
 
       // Calculate total setup time
       metrics.totals.totalSetup = Date.now() - metrics.startTime;
 
       // Log timing report
       console.log(formatMetrics(metrics));
-      console.log(`[Sandbox] ✅ Async prompt sent, scheduling polling action`);
+      console.log(`[DEPRECATED:Sandbox] Async prompt sent, scheduling polling action`);
 
       // Store metrics in session for later analysis
       await ctx.runMutation(internal.workflows.lifecycleSandbox.storeSessionMetrics, {
@@ -864,7 +898,7 @@ BEADS_EOF`);
       return { success: true, output: "", toolCalls: [], todos: [], status: "polling" };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[Sandbox] ❌ Error during setup: ${message}`);
+      console.error(`[DEPRECATED:Sandbox] Error during setup: ${message}`);
       await ctx.runMutation(api.workflows.lifecycleSandbox.updateSessionStatus, {
         sessionId: args.sessionId,
         status: "failed",
@@ -905,11 +939,11 @@ export const timeoutWatchdog = internalAction({
     });
 
     if (session?.status === "completed" || session?.status === "failed" || session?.status === "cancelled") {
-      console.log(`[Watchdog] Session ${args.sessionId} already ${session.status}, cleaning up sandbox`);
+      console.log(`[DEPRECATED:Watchdog] Session ${args.sessionId} already ${session.status}, cleaning up sandbox`);
     } else {
       // Session still running after 10 minutes - mark as timed out
       const elapsed = Math.round((Date.now() - args.startTime) / 1000);
-      console.log(`[Watchdog] Session ${args.sessionId} timed out after ${elapsed}s`);
+      console.log(`[DEPRECATED:Watchdog] Session ${args.sessionId} timed out after ${elapsed}s`);
 
       await ctx.runMutation(api.workflows.lifecycleSandbox.updateSessionStatus, {
         sessionId: args.sessionId,
@@ -923,9 +957,9 @@ export const timeoutWatchdog = internalAction({
       const { Sandbox } = await import("@e2b/code-interpreter");
       const sandbox = await Sandbox.connect(args.sandboxId);
       await sandbox.kill();
-      console.log(`[Watchdog] Killed sandbox ${args.sandboxId}`);
+      console.log(`[DEPRECATED:Watchdog] Killed sandbox ${args.sandboxId}`);
     } catch (e) {
-      console.log(`[Watchdog] Sandbox cleanup: ${e}`);
+      console.log(`[DEPRECATED:Watchdog] Sandbox cleanup: ${e}`);
     }
   },
 });
@@ -963,16 +997,16 @@ export const pollSandboxCompletion = internalAction({
       });
 
       if (session?.status === "completed" || session?.status === "failed") {
-        console.log(`[Poll ${args.pollCount}] Session already ${session.status} (via forwarder), cleaning up`);
+        console.log(`[DEPRECATED:Poll ${args.pollCount}] Session already ${session.status} (via forwarder), cleaning up`);
 
         // Kill the sandbox
         try {
           const { Sandbox } = await import("@e2b/code-interpreter");
           const sandbox = await Sandbox.connect(args.sandboxId);
           await sandbox.kill();
-          console.log(`[Poll] Killed sandbox ${args.sandboxId}`);
+          console.log(`[DEPRECATED:Poll] Killed sandbox ${args.sandboxId}`);
         } catch (e) {
-          console.log(`[Poll] Sandbox cleanup: ${e}`);
+          console.log(`[DEPRECATED:Poll] Sandbox cleanup: ${e}`);
         }
         return;
       }
@@ -1007,7 +1041,7 @@ export const pollSandboxCompletion = internalAction({
 
           // Debug: Log progress
           if (args.pollCount % 3 === 0 || totalParts > lastPartsCount) {
-            console.log(`[Poll ${args.pollCount}] 📬 Messages: ${messages.length}, Parts: ${totalParts} (last seen: ${lastPartsCount})`);
+            console.log(`[DEPRECATED:Poll ${args.pollCount}] Messages: ${messages.length}, Parts: ${totalParts} (last seen: ${lastPartsCount})`);
           }
 
           // Stream new parts to Convex (parts we haven't seen before)
@@ -1027,7 +1061,7 @@ export const pollSandboxCompletion = internalAction({
               name = name.replace(/([A-Z])/g, " $1").trim();
               return name.charAt(0).toUpperCase() + name.slice(1);
             };
-            console.log(`[Poll ${args.pollCount}] 📝 Processing ${newParts.length} new parts`);
+            console.log(`[DEPRECATED:Poll ${args.pollCount}] Processing ${newParts.length} new parts`);
 
             for (const { role, part } of newParts) {
               // Only log meaningful events:
@@ -1047,14 +1081,14 @@ export const pollSandboxCompletion = internalAction({
 
                 // Special handling for specific tools
                 if (rawName.includes("saveArtifact")) {
-                  logsToAdd.push(`📄 Saving artifact...`);
+                  logsToAdd.push(`[DEPRECATED] Saving artifact...`);
                 } else if (rawName.includes("completeStage")) {
-                  logsToAdd.push(`🏁 Completing stage...`);
+                  logsToAdd.push(`[DEPRECATED] Completing stage...`);
                 } else if (rawName.includes("beads.create") || rawName.includes("beads.close") || rawName.includes("beads.update")) {
                   const action = rawName.includes("create") ? "Creating" : rawName.includes("close") ? "Completing" : "Updating";
-                  logsToAdd.push(`📋 ${action} task...`);
+                  logsToAdd.push(`[DEPRECATED] ${action} task...`);
                 } else if (state === "calling" || state === "pending") {
-                  logsToAdd.push(`🔧 ${toolName}...`);
+                  logsToAdd.push(`[DEPRECATED] ${toolName}...`);
                 }
               } else if (part.type === "tool-result" || part.toolResult) {
                 // Tool completed
@@ -1064,30 +1098,30 @@ export const pollSandboxCompletion = internalAction({
                 // Check for errors in result
                 const hasError = part.toolResult?.error || part.state?.error;
                 if (hasError) {
-                  logsToAdd.push(`❌ ${toolName} failed`);
+                  logsToAdd.push(`[DEPRECATED] ${toolName} failed`);
                 } else if (rawName.includes("saveArtifact")) {
                   // Get artifact name from result if available
                   const result = part.toolResult?.result || part.result;
                   const name = result?.saved || result?.name || "artifact";
-                  logsToAdd.push(`✅ Saved: ${name}`);
+                  logsToAdd.push(`[DEPRECATED] Saved: ${name}`);
                 } else if (rawName.includes("completeStage")) {
-                  logsToAdd.push(`✅ Stage completed`);
+                  logsToAdd.push(`[DEPRECATED] Stage completed`);
                 } else if (rawName.includes("beads.create")) {
                   const result = part.toolResult?.result || part.result;
                   const title = result?.title || "task";
-                  logsToAdd.push(`✅ Created: ${title}`);
+                  logsToAdd.push(`[DEPRECATED] Created: ${title}`);
                 } else if (rawName.includes("beads.close")) {
-                  logsToAdd.push(`✅ Task completed`);
+                  logsToAdd.push(`[DEPRECATED] Task completed`);
                 } else {
                   // Generic tool completion
-                  logsToAdd.push(`✅ ${toolName}`);
+                  logsToAdd.push(`[DEPRECATED] ${toolName}`);
                 }
               }
               // Skip: text, reasoning, step-start, step-finish, patch, unknown
             }
 
             if (logsToAdd.length > 0) {
-              console.log(`[Poll ${args.pollCount}] 📨 Streaming ${logsToAdd.length} new log entries`);
+              console.log(`[DEPRECATED:Poll ${args.pollCount}] Streaming ${logsToAdd.length} new log entries`);
               await ctx.runMutation(api.workflows.lifecycleSandbox.appendSessionLogs, {
                 sessionId: args.sessionId,
                 logs: logsToAdd,
@@ -1097,7 +1131,7 @@ export const pollSandboxCompletion = internalAction({
         }
       } catch (e) {
         // Don't fail the poll if message streaming fails
-        console.log(`[Poll ${args.pollCount}] ⚠️ Message fetch error: ${e}`);
+        console.log(`[DEPRECATED:Poll ${args.pollCount}] Message fetch error: ${e}`);
       }
 
       // ═══════════════════════════════════════════════════════════════════════
@@ -1111,7 +1145,7 @@ export const pollSandboxCompletion = internalAction({
       if (!statusRes.ok) {
         // Check if sandbox is dead (E2B returns 502 with specific messages)
         const errorBody = await statusRes.text().catch(() => "");
-        console.log(`[Poll ${args.pollCount}] Status fetch failed: ${statusRes.status}, body: ${errorBody.slice(0, 200)}`);
+        console.log(`[DEPRECATED:Poll ${args.pollCount}] Status fetch failed: ${statusRes.status}, body: ${errorBody.slice(0, 200)}`);
 
         // If sandbox is dead or port not open, fail fast
         if (errorBody.includes("not found") || errorBody.includes("not open") || statusRes.status === 502) {
@@ -1143,7 +1177,7 @@ export const pollSandboxCompletion = internalAction({
       if (sessionStatus === undefined) {
         // Session not in status list - check if it's because it completed
         // by verifying we have messages (meaning the session existed and ran)
-        console.log(`[Poll ${args.pollCount}] ${elapsed}s elapsed - session not in status list, checking for completion...`);
+        console.log(`[DEPRECATED:Poll ${args.pollCount}] ${elapsed}s elapsed - session not in status list, checking for completion...`);
 
         // Quick check: try to fetch messages to see if session existed
         const msgCheckRes = await fetch(`${baseUrl}/session/${args.openCodeSessionId}/message`, {
@@ -1157,11 +1191,11 @@ export const pollSandboxCompletion = internalAction({
 
           if (messages.length > 0) {
             // We have messages, so the session ran and completed (removed from status)
-            console.log(`[Poll ${args.pollCount}] ✅ Session completed (removed from status list, has ${messages.length} messages)`);
+            console.log(`[DEPRECATED:Poll ${args.pollCount}] Session completed (removed from status list, has ${messages.length} messages)`);
             // Fall through to result collection below
           } else if (args.pollCount < 5) {
             // No messages yet and early in polling - maybe still initializing
-            console.log(`[Poll ${args.pollCount}] No messages yet, scheduling retry...`);
+            console.log(`[DEPRECATED:Poll ${args.pollCount}] No messages yet, scheduling retry...`);
             await ctx.scheduler.runAfter(pollInterval, internal.workflows.lifecycleSandbox.pollSandboxCompletion, {
               ...args,
               pollCount: args.pollCount + 1,
@@ -1179,7 +1213,7 @@ export const pollSandboxCompletion = internalAction({
       } else {
         // OpenCode returns {type: "busy"} or {type: "idle"}, not {status: ...}
         const status = sessionStatus?.type || sessionStatus?.status || "unknown";
-        console.log(`[Poll ${args.pollCount}] ${elapsed}s elapsed, type=${status}, raw=${JSON.stringify(sessionStatus).slice(0, 100)}`);
+        console.log(`[DEPRECATED:Poll ${args.pollCount}] ${elapsed}s elapsed, type=${status}, raw=${JSON.stringify(sessionStatus).slice(0, 100)}`);
 
         // Check if still processing
         if (status === "busy" || status === "processing") {
@@ -1203,7 +1237,7 @@ export const pollSandboxCompletion = internalAction({
         }
 
         // type === "idle" || type === "ready" - session is done
-        console.log(`[Poll ${args.pollCount}] ✅ OpenCode completed in ${elapsed}s (status: ${status})`);
+        console.log(`[DEPRECATED:Poll ${args.pollCount}] OpenCode completed in ${elapsed}s (status: ${status})`);
       }
 
       // Collect results via direct HTTP
@@ -1219,7 +1253,7 @@ export const pollSandboxCompletion = internalAction({
         try {
           return JSON.parse(text);
         } catch (e: any) {
-          console.error(`[Sandbox] Failed to parse ${name}: ${e.message}`);
+          console.error(`[DEPRECATED:Sandbox] Failed to parse ${name}: ${e.message}`);
           return [];
         }
       };
@@ -1228,7 +1262,7 @@ export const pollSandboxCompletion = internalAction({
       const todos = safeJsonParse(await todosRes.text(), "todos");
       const diffs = safeJsonParse(await diffsRes.text(), "diffs");
 
-      console.log(`[Sandbox] Collected: ${messages.length} messages, ${todos.length} todos, ${diffs.length} diffs`);
+      console.log(`[DEPRECATED:Sandbox] Collected: ${messages.length} messages, ${todos.length} todos, ${diffs.length} diffs`);
 
       // Extract assistant responses with structured output:
       // - thinking: All reasoning and intermediate activity (for progress UI)
@@ -1253,7 +1287,7 @@ export const pollSandboxCompletion = internalAction({
           if (part.type === "text" && part.text) {
             // Skip if it looks like the system prompt being echoed
             if (part.text.startsWith("# ") && part.text.includes("## Context") && part.text.includes("## Rules")) {
-              console.log(`[Sandbox] Skipping system prompt echo (${part.text.length} chars)`);
+              console.log(`[DEPRECATED:Sandbox] Skipping system prompt echo (${part.text.length} chars)`);
               continue;
             }
 
@@ -1266,20 +1300,20 @@ export const pollSandboxCompletion = internalAction({
             }
           } else if (part.type === "reasoning" && part.text) {
             // Chain of thought reasoning
-            thinkingParts.push(`💭 ${part.text}`);
+            thinkingParts.push(`[DEPRECATED] ${part.text}`);
           } else if (part.type === "tool-invocation" || part.type === "tool") {
             const toolName = part.toolInvocation?.toolName || part.toolName || part.callID?.match(/tool_([^_]+_[^_]+)/)?.[1]?.replace("_", ".") || "unknown";
             const status = part.toolInvocation?.state?.status || part.state || "calling";
             const args = part.toolInvocation?.args || part.args;
             toolCalls.push({ name: toolName, status, args });
-            thinkingParts.push(`🔧 ${toolName}(${JSON.stringify(args || {}).slice(0, 100)})`);
+            thinkingParts.push(`[DEPRECATED] ${toolName}(${JSON.stringify(args || {}).slice(0, 100)})`);
           } else if (part.type === "tool-result") {
             const toolName = part.toolName || part.toolResult?.toolName || "unknown";
             const result = typeof part.result === "string" ? part.result : JSON.stringify(part.result || {});
             // Update the last matching tool call with result
             const lastCall = [...toolCalls].reverse().find(t => t.name === toolName);
             if (lastCall) lastCall.result = result.slice(0, 500);
-            thinkingParts.push(`✅ ${toolName} → ${result.slice(0, 100)}`);
+            thinkingParts.push(`[DEPRECATED] ${toolName} -> ${result.slice(0, 100)}`);
           }
         }
       }
@@ -1290,7 +1324,7 @@ export const pollSandboxCompletion = internalAction({
         finalResponse = thinkingParts.pop() || "";
       }
 
-      console.log(`[Sandbox] Extracted: thinking=${thinkingParts.length} parts, response=${finalResponse.length} chars, tools=${toolCalls.length}`);
+      console.log(`[DEPRECATED:Sandbox] Extracted: thinking=${thinkingParts.length} parts, response=${finalResponse.length} chars, tools=${toolCalls.length}`);
 
       // Calculate final timing metrics
       const totalExecutionMs = Date.now() - args.startTime;
@@ -1303,13 +1337,13 @@ export const pollSandboxCompletion = internalAction({
       };
 
       // Log final timing report
-      console.log(`\n📊 EXECUTION COMPLETE`);
-      console.log(`─`.repeat(50));
+      console.log(`\n[DEPRECATED] EXECUTION COMPLETE`);
+      console.log(`-`.repeat(50));
       console.log(`Total execution:     ${(totalExecutionMs / 1000).toFixed(1)}s`);
       console.log(`Poll count:          ${args.pollCount}`);
       console.log(`Messages:            ${messages.length}`);
       console.log(`Tool calls:          ${toolCalls.length}`);
-      console.log(`─`.repeat(50));
+      console.log(`-`.repeat(50));
 
       // Update session with results and metrics
       // Output structure:
@@ -1339,7 +1373,7 @@ export const pollSandboxCompletion = internalAction({
       // Add final timing log entry
       await ctx.runMutation(api.workflows.lifecycleSandbox.appendSessionLogs, {
         sessionId: args.sessionId,
-        logs: [`⏱️ EXECUTION: ${(totalExecutionMs / 1000).toFixed(1)}s (${args.pollCount} polls, ${toolCalls.length} tools)`],
+        logs: [`[DEPRECATED] EXECUTION: ${(totalExecutionMs / 1000).toFixed(1)}s (${args.pollCount} polls, ${toolCalls.length} tools)`],
       });
 
       // Capture workspace files before killing sandbox
@@ -1347,19 +1381,19 @@ export const pollSandboxCompletion = internalAction({
         try {
           const { Sandbox } = await import("@e2b/code-interpreter");
           const sandbox = await Sandbox.connect(args.sandboxId);
-          
+
           const filesToSync: Array<{ path: string; name: string; content: string; type: string }> = [];
-          
+
           for (const diff of diffs) {
             const filePath = diff.path || diff;
             if (!filePath || typeof filePath !== "string") continue;
-            
+
             try {
               // Read file content from sandbox
               const result = await sandbox.commands.run(`cat "${filePath}" 2>/dev/null || echo ""`);
               const content = result.stdout || "";
               if (!content) continue;
-              
+
               // Determine file type from extension
               const ext = filePath.split(".").pop()?.toLowerCase() || "";
               const typeMap: Record<string, string> = {
@@ -1370,7 +1404,7 @@ export const pollSandboxCompletion = internalAction({
                 html: "html", css: "code", scss: "code",
                 txt: "text", csv: "csv",
               };
-              
+
               filesToSync.push({
                 path: filePath,
                 name: filePath.split("/").pop() || "file",
@@ -1381,21 +1415,21 @@ export const pollSandboxCompletion = internalAction({
               // Skip files that can't be read
             }
           }
-          
+
           if (filesToSync.length > 0) {
-            console.log(`[Sandbox] 📦 Capturing ${filesToSync.length} workspace files...`);
+            console.log(`[DEPRECATED:Sandbox] Capturing ${filesToSync.length} workspace files...`);
             await ctx.runMutation(api.features.kanban.file_sync.batchFileSync, {
               cardId: args.cardId as any,
               files: filesToSync,
             });
-            console.log(`[Sandbox] ✅ Workspace captured`);
+            console.log(`[DEPRECATED:Sandbox] Workspace captured`);
           }
-          
+
           // Kill the sandbox after capture
           await sandbox.kill();
-          console.log(`[Sandbox] Killed sandbox ${args.sandboxId}`);
+          console.log(`[DEPRECATED:Sandbox] Killed sandbox ${args.sandboxId}`);
         } catch (e) {
-          console.log(`[Sandbox] Workspace capture/kill error: ${e}`);
+          console.log(`[DEPRECATED:Sandbox] Workspace capture/kill error: ${e}`);
         }
       } else {
         // No cardId or no diffs - just kill the sandbox
@@ -1403,14 +1437,14 @@ export const pollSandboxCompletion = internalAction({
           const { Sandbox } = await import("@e2b/code-interpreter");
           const sandbox = await Sandbox.connect(args.sandboxId);
           await sandbox.kill();
-          console.log(`[Sandbox] Killed sandbox ${args.sandboxId}`);
+          console.log(`[DEPRECATED:Sandbox] Killed sandbox ${args.sandboxId}`);
         } catch (e) {
-          console.log(`[Sandbox] Failed to kill sandbox (may already be dead): ${e}`);
+          console.log(`[DEPRECATED:Sandbox] Failed to kill sandbox (may already be dead): ${e}`);
         }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[Poll ${args.pollCount}] ❌ Error: ${message}`);
+      console.error(`[DEPRECATED:Poll ${args.pollCount}] Error: ${message}`);
 
       await ctx.runMutation(api.workflows.lifecycleSandbox.updateSessionStatus, {
         sessionId: args.sessionId,
@@ -1434,6 +1468,7 @@ export const pollSandboxCompletion = internalAction({
 export const cancelSession = action({
   args: { sessionId: v.id("agentSessions") },
   handler: async (ctx, args) => {
+    console.warn("[DEPRECATED] lifecycleSandbox.cancelSession is deprecated. Use sandboxConvex.cancelSession instead.");
     const session = await ctx.runQuery(api.workflows.lifecycleSandbox.getSession, { sessionId: args.sessionId });
     if (!session) throw new Error("Session not found");
 
