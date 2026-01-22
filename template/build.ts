@@ -317,10 +317,10 @@ const customTemplate = (baseId: string, buildDir: string, config: TemplateConfig
     sudo chmod +x /usr/local/bin/generate-pdf && \
     echo '#!/bin/bash\nbun run /home/user/lakitu/runtime/browser/agent-browser-cli.ts "$@"' | sudo tee /usr/local/bin/agent-browser && \
     sudo chmod +x /usr/local/bin/agent-browser && \
-    cp -r /home/user/project-ksa/*.ts /home/user/lakitu/ksa/ && \
+    cp -r /home/user/project-ksa/* /home/user/lakitu/ksa/ && \
     ln -sf /home/user/lakitu/ksa /home/user/ksa && \
     chown -R user:user /home/user/lakitu/ksa && \
-    echo "KSA modules:" && ls /home/user/lakitu/ksa/*.ts 2>/dev/null | head -20
+    echo "KSA modules:" && find /home/user/lakitu/ksa -name "*.ts" | head -30
   `)
   // Verify state was copied (including sqlite db!)
   .runCmd(`

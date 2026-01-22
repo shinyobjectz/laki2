@@ -20,6 +20,7 @@ import type * as agent_subagents from "../agent/subagents.js";
 import type * as brandResearch_index from "../brandResearch/index.js";
 import type * as context_index from "../context/index.js";
 import type * as context_session from "../context/session.js";
+import type * as http from "../http.js";
 import type * as index from "../index.js";
 import type * as nodeActions_codeExec from "../nodeActions/codeExec.js";
 import type * as planning_beads from "../planning/beads.js";
@@ -34,6 +35,7 @@ import type * as state_checkpoints from "../state/checkpoints.js";
 import type * as state_files from "../state/files.js";
 import type * as state_index from "../state/index.js";
 import type * as state_verification from "../state/verification.js";
+import type * as sync_index from "../sync/index.js";
 import type * as utils_codeExecHelpers from "../utils/codeExecHelpers.js";
 
 import type {
@@ -55,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   "brandResearch/index": typeof brandResearch_index;
   "context/index": typeof context_index;
   "context/session": typeof context_session;
+  http: typeof http;
   index: typeof index;
   "nodeActions/codeExec": typeof nodeActions_codeExec;
   "planning/beads": typeof planning_beads;
@@ -69,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   "state/files": typeof state_files;
   "state/index": typeof state_index;
   "state/verification": typeof state_verification;
+  "sync/index": typeof sync_index;
   "utils/codeExecHelpers": typeof utils_codeExecHelpers;
 }>;
 
